@@ -3,3 +3,5 @@ data/mwahaha_dev_tasks-ab.zip
 .venv
 .idea
 
+data/jokes_api.json
+data/jokes_third_set.csv
