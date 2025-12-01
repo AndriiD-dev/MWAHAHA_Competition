@@ -11,29 +11,23 @@ The dataset is expected to be a JSONL file with one example per line:
 `response` – the desired model output (for example, the punchline).
 """
 
-import os
 from dataclasses import dataclass
 from typing import Dict, Any
 
 import torch
 from datasets import load_dataset
 from peft import LoraConfig
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    TrainingArguments,
-)
-from trl import SFTTrainer
-
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from trl import SFTTrainer, SFTConfig
 
 
 @dataclass
 class FinetuneConfig:
     model_id: str = "Qwen/Qwen2.5-3B-Instruct"
+    dataset_path: str = "data/merged_sft_jokes.jsonl"
+    output_dir: str = "qwen_lora_jokes"
 
-    dataset_path: str = "data/jokes_lora_with_conditions.jsonl"
-    output_dir: str = "qwen2_5_3b_instruct_jokes_lora"
-
+    # sequence and training
     max_seq_length: int = 1024
     num_train_epochs: int = 3
     per_device_train_batch_size: int = 1
@@ -42,10 +36,12 @@ class FinetuneConfig:
     warmup_ratio: float = 0.03
     weight_decay: float = 0.0
 
+    # LoRA
     lora_r: int = 64
     lora_alpha: int = 16
     lora_dropout: float = 0.05
 
+    # misc
     logging_steps: int = 10
     save_strategy: str = "epoch"
     seed: int = 42
@@ -53,29 +49,33 @@ class FinetuneConfig:
 
 cfg = FinetuneConfig()
 
-def load_qwen_text(model_id: str):
-    """
-    Load a text-only Qwen Instruct model and its tokenizer.
-    """
 
+def load_qwen_text(model_id: str):
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+        dtype = torch.float16
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+        dtype = torch.bfloat16
+    else:
+        device = torch.device("cpu")
+        dtype = torch.float32
 
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto",
-    )
+        torch_dtype=dtype,
+    ).to(device)
 
     model.config.use_cache = False
-
     return model, tokenizer
 
 
-model, tokenizer = load_qwen_text(cfg.model_id)
 
+model, tokenizer = load_qwen_text(cfg.model_id)
 
 
 peft_config = LoraConfig(
@@ -95,44 +95,44 @@ peft_config = LoraConfig(
     ],
 )
 
-"""
-Expected dataset format (JSONL):
-
-{"prompt": "...", "response": "..."}
-{"prompt": "...", "response": "..."}
-...
-
-We will ignore any extra fields.
-"""
-
 dataset = load_dataset(
     "json",
     data_files={"train": cfg.dataset_path},
     split="train",
 )
 
+SYSTEM_PROMPT = (
+    "You are a multilingual stand-up comedian. "
+    "You write short, original jokes in English, Spanish, and Chinese. "
+    "You ALWAYS obey the user’s constraints exactly (word inclusion, topic, language). "
+    "You prefer concise setups and strong punchlines."
+)
 
 
-def formatting_func(example: Dict[str, Any]) -> str:
-    """
-    Turn one row {prompt, response} into a single chat-formatted string
-    using Qwen's chat template.
-    """
-
+def build_text(example: Dict[str, Any]) -> Dict[str, Any]:
     messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": example["prompt"]},
         {"role": "assistant", "content": example["response"]},
     ]
-
     text = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=False,
     )
-    return text
+    example["text"] = text
+    return example
 
 
-training_args = TrainingArguments(
+dataset = dataset.map(build_text)
+
+cols_to_remove = [c for c in dataset.column_names if c != "text"]
+if cols_to_remove:
+    dataset = dataset.remove_columns(cols_to_remove)
+
+
+
+sft_config = SFTConfig(
     output_dir=cfg.output_dir,
     num_train_epochs=cfg.num_train_epochs,
     per_device_train_batch_size=cfg.per_device_train_batch_size,
@@ -145,25 +145,22 @@ training_args = TrainingArguments(
     bf16=torch.cuda.is_available(),
     lr_scheduler_type="cosine",
     optim="adamw_torch",
-    report_to=[],
     seed=cfg.seed,
+    max_length=cfg.max_seq_length,
 )
 
 trainer = SFTTrainer(
     model=model,
-    tokenizer=tokenizer,
-    peft_config=peft_config,
+    args=sft_config,
     train_dataset=dataset,
-    dataset_text_field=None,
-    formatting_func=formatting_func,
-    max_seq_length=cfg.max_seq_length,
-    args=training_args,
+    processing_class=tokenizer,
+    peft_config=peft_config,
 )
 
 
-if __name__ == "__main__":
-    trainer.train()
-    trainer.model.save_pretrained(cfg.output_dir)
-    tokenizer.save_pretrained(cfg.output_dir)
+trainer.train()
 
-    print("Training complete. LoRA adapter saved to", cfg.output_dir)
+trainer.model.save_pretrained(cfg.output_dir)
+tokenizer.save_pretrained(cfg.output_dir)
+
+print("Training complete. LoRA adapter saved to", cfg.output_dir)
