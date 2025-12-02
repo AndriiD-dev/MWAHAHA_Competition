@@ -171,7 +171,7 @@ training_args = SFTConfig(
     metric_for_best_model="eval_loss",
     greater_is_better=False,
 
-    max_seq_length=cfg.max_seq_length,
+    max_length=cfg.max_seq_length,
     dataset_text_field="text",
     packing=False,
 )
