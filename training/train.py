@@ -179,7 +179,6 @@ trainer = SFTTrainer(
     eval_dataset=eval_dataset,
     peft_config=peft_config,
     processing_class=tokenizer,
-    dataset_text_field="text",
     max_seq_length=cfg.max_seq_length,
 )
 
