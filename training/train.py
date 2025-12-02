@@ -18,7 +18,7 @@ from typing import Dict, Any
 import torch
 from datasets import load_dataset
 from peft import LoraConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 from trl import SFTTrainer, SFTConfig
 
 
@@ -148,7 +148,7 @@ split = raw_dataset.train_test_split(
 train_dataset = prepare_split(split["train"])
 eval_dataset = prepare_split(split["test"])
 
-sft_config = SFTConfig(
+training_args = TrainingArguments(
     output_dir=cfg.output_dir,
     num_train_epochs=cfg.num_train_epochs,
     per_device_train_batch_size=cfg.per_device_train_batch_size,
@@ -163,21 +163,23 @@ sft_config = SFTConfig(
     lr_scheduler_type="cosine",
     optim="adamw_torch",
     seed=cfg.seed,
-    max_length=cfg.max_seq_length,
-
     evaluation_strategy=cfg.evaluation_strategy,
     eval_steps=cfg.eval_steps,
     load_best_model_at_end=True,
+    metric_for_best_model="eval_loss",
+    greater_is_better=False,
 )
 
 
 trainer = SFTTrainer(
     model=model,
-    args=sft_config,
+    args=training_args,
     train_dataset=train_dataset,
     eval_dataset=eval_dataset,
-    processing_class=tokenizer,
     peft_config=peft_config,
+    tokenizer=tokenizer,
+    dataset_text_field="text",
+    max_seq_length=cfg.max_seq_length,
 )
 
 
