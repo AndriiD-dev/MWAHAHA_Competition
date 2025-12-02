@@ -11,6 +11,7 @@ The dataset is expected to be a JSONL file with one example per line:
 `response` – the desired model output (for example, the punchline).
 """
 
+import math
 from dataclasses import dataclass
 from typing import Dict, Any
 
@@ -31,6 +32,7 @@ class FinetuneConfig:
     max_seq_length: int = 1024
     num_train_epochs: int = 3
     per_device_train_batch_size: int = 1
+    per_device_eval_batch_size: int = 1
     gradient_accumulation_steps: int = 4
     learning_rate: float = 2e-4
     warmup_ratio: float = 0.03
@@ -40,6 +42,11 @@ class FinetuneConfig:
     lora_r: int = 64
     lora_alpha: int = 16
     lora_dropout: float = 0.05
+
+    # evaluation
+    eval_ratio: float = 0.05
+    evaluation_strategy: str = "steps"
+    eval_steps: int = 500
 
     # misc
     logging_steps: int = 10
@@ -74,7 +81,6 @@ def load_qwen_text(model_id: str):
     return model, tokenizer
 
 
-
 model, tokenizer = load_qwen_text(cfg.model_id)
 
 
@@ -95,11 +101,6 @@ peft_config = LoraConfig(
     ],
 )
 
-dataset = load_dataset(
-    "json",
-    data_files={"train": cfg.dataset_path},
-    split="train",
-)
 
 SYSTEM_PROMPT = (
     "You are a multilingual stand-up comedian. "
@@ -124,18 +125,34 @@ def build_text(example: Dict[str, Any]) -> Dict[str, Any]:
     return example
 
 
-dataset = dataset.map(build_text)
+def prepare_split(split_ds):
+    split_ds = split_ds.map(build_text)
+    cols_to_remove = [c for c in split_ds.column_names if c != "text"]
+    if cols_to_remove:
+        split_ds = split_ds.remove_columns(cols_to_remove)
+    return split_ds
 
-cols_to_remove = [c for c in dataset.column_names if c != "text"]
-if cols_to_remove:
-    dataset = dataset.remove_columns(cols_to_remove)
 
+# load full dataset, then split into train / eval
+raw_dataset = load_dataset(
+    "json",
+    data_files={"train": cfg.dataset_path},
+    split="train",
+)
 
+split = raw_dataset.train_test_split(
+    test_size=cfg.eval_ratio,
+    seed=cfg.seed,
+)
+
+train_dataset = prepare_split(split["train"])
+eval_dataset = prepare_split(split["test"])
 
 sft_config = SFTConfig(
     output_dir=cfg.output_dir,
     num_train_epochs=cfg.num_train_epochs,
     per_device_train_batch_size=cfg.per_device_train_batch_size,
+    per_device_eval_batch_size=cfg.per_device_eval_batch_size,
     gradient_accumulation_steps=cfg.gradient_accumulation_steps,
     learning_rate=cfg.learning_rate,
     warmup_ratio=cfg.warmup_ratio,
@@ -147,20 +164,41 @@ sft_config = SFTConfig(
     optim="adamw_torch",
     seed=cfg.seed,
     max_length=cfg.max_seq_length,
+
+    evaluation_strategy=cfg.evaluation_strategy,
+    eval_steps=cfg.eval_steps,
+    load_best_model_at_end=True,
 )
+
 
 trainer = SFTTrainer(
     model=model,
     args=sft_config,
-    train_dataset=dataset,
+    train_dataset=train_dataset,
+    eval_dataset=eval_dataset,
     processing_class=tokenizer,
     peft_config=peft_config,
 )
 
 
-trainer.train()
+def main():
+    train_result = trainer.train()
 
-trainer.model.save_pretrained(cfg.output_dir)
-tokenizer.save_pretrained(cfg.output_dir)
+    eval_metrics = trainer.evaluate()
+    print("Eval metrics:", eval_metrics)
 
-print("Training complete. LoRA adapter saved to", cfg.output_dir)
+    if "eval_loss" in eval_metrics:
+        try:
+            ppl = math.exp(eval_metrics["eval_loss"])
+            print(f"Perplexity: {ppl:.2f}")
+        except OverflowError:
+            print("Perplexity overflow (loss too large).")
+
+    # Save adapter and tokenizer
+    trainer.model.save_pretrained(cfg.output_dir)
+    tokenizer.save_pretrained(cfg.output_dir)
+    print("Training complete. LoRA adapter saved to", cfg.output_dir)
+
+
+if __name__ == "__main__":
+    main()
