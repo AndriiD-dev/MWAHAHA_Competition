@@ -50,7 +50,7 @@ class FinetuneConfig:
 
     # misc
     logging_steps: int = 10
-    save_strategy: str = "epoch"
+    save_strategy: str = "steps"
     seed: int = 42
 
 
@@ -158,7 +158,8 @@ training_args = TrainingArguments(
     warmup_ratio=cfg.warmup_ratio,
     weight_decay=cfg.weight_decay,
     logging_steps=cfg.logging_steps,
-    save_strategy=cfg.save_strategy,
+    save_strategy="steps",
+    save_steps=cfg.eval_steps,
     bf16=torch.cuda.is_available(),
     lr_scheduler_type="cosine",
     optim="adamw_torch",
