@@ -148,7 +148,8 @@ split = raw_dataset.train_test_split(
 train_dataset = prepare_split(split["train"])
 eval_dataset = prepare_split(split["test"])
 
-training_args = TrainingArguments(
+
+training_args = SFTConfig(
     output_dir=cfg.output_dir,
     num_train_epochs=cfg.num_train_epochs,
     per_device_train_batch_size=cfg.per_device_train_batch_size,
@@ -169,10 +170,11 @@ training_args = TrainingArguments(
     load_best_model_at_end=True,
     metric_for_best_model="eval_loss",
     greater_is_better=False,
+
     max_seq_length=cfg.max_seq_length,
     dataset_text_field="text",
+    packing=False,
 )
-
 
 trainer = SFTTrainer(
     model=model,
