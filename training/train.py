@@ -169,6 +169,8 @@ training_args = TrainingArguments(
     load_best_model_at_end=True,
     metric_for_best_model="eval_loss",
     greater_is_better=False,
+    max_seq_length=cfg.max_seq_length,
+    dataset_text_field="text",
 )
 
 
@@ -179,7 +181,6 @@ trainer = SFTTrainer(
     eval_dataset=eval_dataset,
     peft_config=peft_config,
     processing_class=tokenizer,
-    max_seq_length=cfg.max_seq_length,
 )
 
 
