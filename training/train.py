@@ -44,7 +44,7 @@ class FinetuneConfig:
     lora_dropout: float = 0.05
 
     # evaluation
-    eval_ratio: float = 0.05
+    eval_ratio: float = 0.1
     evaluation_strategy: str = "steps"
     eval_steps: int = 500
 
