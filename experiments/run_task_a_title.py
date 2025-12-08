@@ -200,15 +200,20 @@ def save_and_zip(df_out: pd.DataFrame, output_dir: Path, filename: str) -> Path:
 
 def copy_to_drive(zip_path: Path, drive_dir: str):
     try:
-        from google.colab import drive as colab_drive  # type: ignore
+        from google.colab import drive as colab_drive  # noqa: F401
     except ImportError:
         print("Not running in Colab, skipping Google Drive upload.")
         return
 
     drive_root = Path("/content/drive")
+
     if not drive_root.exists():
-        print("Mounting Google Drive...")
-        colab_drive.mount("/content/drive")
+        print(
+            "Google Drive is not mounted. "
+            "Run `from google.colab import drive; drive.mount('/content/drive')` "
+            "in a notebook cell before running this script."
+        )
+        return
 
     dest_dir = drive_root / Path(drive_dir).relative_to("/content/drive")
     dest_dir.mkdir(parents=True, exist_ok=True)
