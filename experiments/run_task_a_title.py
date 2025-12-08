@@ -1,5 +1,3 @@
-# experiments/run_task_a_title.py
-
 from __future__ import annotations
 
 import time
@@ -34,33 +32,34 @@ print("Output dir  :", OUTPUT_DIR)
 @dataclass
 class InferenceConfig:
     base_model_id: str = "Qwen/Qwen2.5-3B-Instruct"
-    adapter_repo_id: str = "An-di/qwen2_5_3b_jokes_lora"  # your HF LoRA repo
+    adapter_repo_id: str = "An-di/qwen2_5_3b_jokes_lora"
 
     input_path: Path = DATA_DIR / "task-a-title.csv"
     output_dir: Path = OUTPUT_DIR
     output_filename: str = "task-a-title_predictions.tsv"
 
-    # generation settings
-    max_new_tokens: int = 32     # shorter = faster
+    max_new_tokens: int = 32
     temperature: float = 0.8
     top_p: float = 0.95
     do_sample: bool = True
 
-    batch_size: int = 8          # adjust if you hit CUDA OOM
+    batch_size: int = 8
 
-    # where to copy the final zip on Google Drive (Colab)
     drive_output_dir: str = "/content/drive/MyDrive/MWAHAHA_outputs"
 
 
 cfg = InferenceConfig()
 
 SYSTEM_PROMPT = (
-    "You are a multilingual stand-up comedian. "
-    "You write short, original jokes in English"
-    "You ALWAYS obey the user’s constraints exactly (word inclusion, topic, language). "
-    "You prefer concise setups and strong punchlines."
+    "You are a professional stand-up comedian. "
+    "Your job is to turn each user prompt or headline into ONE short, original joke in English. "
+    "Output exactly one line of text, under 30 words, with no line breaks. "
+    "You must follow the user’s constraints exactly (for example required words, topic, style or length). "
+    "Keep the setup minimal and finish with a clear punchline. "
+    "Do not explain the joke or talk about being an artificial system. "
+    "Avoid offensive content: no hate, slurs, explicit sex, or graphic violence. "
+    "Do not add emojis or extra formatting unless the user explicitly asks. "
 )
-
 
 # ---------------------------------------------------------------------------
 # Model loading
@@ -87,7 +86,7 @@ def load_model_and_tokenizer():
     print("Loading base model:", cfg.base_model_id)
     base_model = AutoModelForCausalLM.from_pretrained(
         cfg.base_model_id,
-        torch_dtype=dtype,
+        dtype=dtype,
         device_map=device_map,
         trust_remote_code=True,
     )
@@ -138,10 +137,8 @@ def generate_responses(
         end_item = min(start_item + len(batch_prompts) - 1, total)
         print(f"\n[Batch {batch_index}] items {start_item}-{end_item} / {total}")
 
-        # build chat prompts
         texts = [build_chat_prompt(tokenizer, p) for p in batch_prompts]
 
-        # tokenize batch
         inputs = tokenizer(
             texts,
             return_tensors="pt",
@@ -151,7 +148,6 @@ def generate_responses(
         input_ids = inputs["input_ids"].to(model.device)
         attention_mask = inputs["attention_mask"].to(model.device)
 
-        # lengths of each prompt (for cutting off the prompt part later)
         input_lengths = attention_mask.sum(dim=1)
 
         gen_ids = model.generate(
@@ -164,10 +160,18 @@ def generate_responses(
             pad_token_id=tokenizer.eos_token_id,
         )
 
-        # decode each item
         for i in range(len(batch_prompts)):
-            new_tokens = gen_ids[i, input_lengths[i]:]
-            resp = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+            global_idx = start_item + i
+            try:
+                new_tokens = gen_ids[i, input_lengths[i]:]
+                resp = tokenizer.decode(
+                    new_tokens, skip_special_tokens=True
+                ).strip()
+                if resp is None:
+                    resp = ""
+            except Exception as e:
+                print(f"  ! Error decoding sample {global_idx}: {e}")
+                resp = ""
             outputs.append(resp)
 
         batch_time = time.time() - batch_start
@@ -187,8 +191,11 @@ def save_and_zip(df_out: pd.DataFrame, output_dir: Path, filename: str) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / filename
 
+    # ensure no NaN are written out
+    df_out = df_out.fillna("")
+
     print("Saving predictions to:", out_path)
-    df_out.to_csv(out_path, sep="\t", index=False)
+    df_out.to_csv(out_path, sep="\t", index=False, na_rep="")
 
     zip_path = out_path.with_suffix(out_path.suffix + ".zip")
     print("Zipping to:", zip_path)
@@ -230,11 +237,18 @@ def copy_to_drive(zip_path: Path, drive_dir: str):
 
 def main():
     print("Loading data from:", cfg.input_path)
-    df = pd.read_csv(cfg.input_path, sep="\t")
+    df = pd.read_csv(
+        cfg.input_path,
+        sep="\t",
+        keep_default_na=False,  # do not turn empty strings into NaN
+    )
 
     if "headline" not in df.columns:
         raise ValueError(f"'headline' column not found in {cfg.input_path}")
-    prompts = df["headline"].astype(str).tolist()
+
+    # sanitize headline column to avoid NaNs in prompts
+    df["headline"] = df["headline"].fillna("").astype(str)
+    prompts = df["headline"].tolist()
     print(f"Total prompts: {len(prompts)}")
 
     model, tokenizer = load_model_and_tokenizer()
@@ -245,6 +259,9 @@ def main():
         prompts,
         batch_size=cfg.batch_size,
     )
+
+    assert len(predictions) == len(df), \
+        f"Predictions ({len(predictions)}) and rows ({len(df)}) mismatch"
 
     df_out = df.copy()
     df_out["prediction"] = predictions
