@@ -24,7 +24,7 @@ class InferenceConfig:
 
     adapter_repo_id: str = "An-di/qwen2_5_3b_jokes_lora"
 
-    input_path: str = "../data/task-a-title.csv"
+    input_path: str = "./data/task-a-title.csv"
     output_dir: str = "outputs"
     output_filename: str = "task-a-title_predictions.csv"
 
