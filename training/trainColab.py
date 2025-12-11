@@ -4,6 +4,7 @@ print("Current working dir:", os.getcwd())
 
 import math
 from dataclasses import dataclass
+from bitsandbytes.config import BitsAndBytesConfig
 from typing import Dict, Any
 
 import torch
@@ -48,23 +49,31 @@ def load_qwen_text(model_id: str):
         tokenizer.pad_token = tokenizer.eos_token
 
     if torch.cuda.is_available():
-        dtype = torch.float16
-        device_map = "auto"
-        print("Using CUDA (float16)")
+        print("Using CUDA with 4-bit QLoRA")
+        quant_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            quantization_config=quant_config,
+            device_map="auto",
+            trust_remote_code=True,
+        )
     else:
-        dtype = torch.float32
-        device_map = None
-        print("CUDA not available, using CPU (float32)")
-
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        torch_dtype=dtype,
-        device_map=device_map,
-    )
+        print("CUDA not available, falling back to CPU fp32")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch.float32,
+            trust_remote_code=True,
+        )
 
     model.config.use_cache = False
     model.gradient_checkpointing_enable()
     return model, tokenizer
+
 
 model, tokenizer = load_qwen_text(cfg.model_id)
 
@@ -134,7 +143,7 @@ def main():
         eval_strategy=cfg.eval_strategy,
         eval_steps=cfg.eval_steps,
         lr_scheduler_type="cosine",
-        optim="adamw_torch",
+        optim="adamw_bnb_8bit", # better optimizer
         seed=cfg.seed,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
@@ -144,7 +153,7 @@ def main():
         report_to=[],
         max_length=cfg.max_seq_length,
         dataset_text_field="text",
-        packing=False,
+        packing=True, # short inputs -> packing to reduce padding
     )
 
     trainer = SFTTrainer(
