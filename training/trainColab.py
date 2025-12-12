@@ -4,7 +4,7 @@ print("Current working dir:", os.getcwd())
 
 import math
 from dataclasses import dataclass
-from bitsandbytes.config import BitsAndBytesConfig
+from transformers import BitsAndBytesConfig
 from typing import Dict, Any
 
 import torch
