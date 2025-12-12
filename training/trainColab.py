@@ -149,7 +149,7 @@ def main():
         metric_for_best_model="eval_loss",
         greater_is_better=False,
         bf16=False,
-        fp16=torch.cuda.is_available(),
+        fp16=False,
         report_to=[],
         max_length=cfg.max_seq_length,
         dataset_text_field="text",
