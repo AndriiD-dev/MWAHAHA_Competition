@@ -4,7 +4,6 @@ print("Current working dir:", os.getcwd())
 
 import math
 from dataclasses import dataclass
-from transformers import BitsAndBytesConfig
 from typing import Dict, Any
 
 import torch
@@ -18,12 +17,19 @@ hf_logging.set_verbosity_info()
 hf_logging.enable_default_handler()
 hf_logging.enable_explicit_format()
 
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
 @dataclass
 class FinetuneConfig:
     model_id: str = "Qwen/Qwen2.5-3B-Instruct"
     dataset_path: str = "data/merged_sft_jokes.jsonl"
     output_dir: str = "qwen_lora_jokes"
-    max_seq_length: int = 1024
+
+    # sequence and training
+    max_seq_length: int = 512          # shorter -> less memory, fine for jokes
     num_train_epochs: int = 3
     per_device_train_batch_size: int = 1
     per_device_eval_batch_size: int = 1
@@ -31,17 +37,29 @@ class FinetuneConfig:
     learning_rate: float = 2e-4
     warmup_ratio: float = 0.03
     weight_decay: float = 0.0
+
+    # LoRA
     lora_r: int = 64
     lora_alpha: int = 16
     lora_dropout: float = 0.05
+
+    # evaluation
     eval_ratio: float = 0.1
     eval_strategy: str = "steps"
     eval_steps: int = 500
+
+    # misc
     logging_steps: int = 10
     save_strategy: str = "steps"
     seed: int = 42
 
+
 cfg = FinetuneConfig()
+
+
+# ---------------------------------------------------------------------------
+# Model + tokenizer (standard fp16 LoRA, no 4-bit)
+# ---------------------------------------------------------------------------
 
 def load_qwen_text(model_id: str):
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
@@ -49,26 +67,20 @@ def load_qwen_text(model_id: str):
         tokenizer.pad_token = tokenizer.eos_token
 
     if torch.cuda.is_available():
-        print("Using CUDA with 4-bit QLoRA")
-        quant_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_quant_type="nf4",
-        )
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            quantization_config=quant_config,
-            device_map="auto",
-            trust_remote_code=True,
-        )
+        print("Using CUDA with fp16")
+        torch_dtype = torch.float16
+        device_map = "auto"
     else:
         print("CUDA not available, falling back to CPU fp32")
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch.float32,
-            trust_remote_code=True,
-        )
+        torch_dtype = torch.float32
+        device_map = None
+
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=torch_dtype,
+        device_map=device_map,
+        trust_remote_code=True,
+    )
 
     model.config.use_cache = False
     model.gradient_checkpointing_enable()
@@ -76,6 +88,11 @@ def load_qwen_text(model_id: str):
 
 
 model, tokenizer = load_qwen_text(cfg.model_id)
+
+
+# ---------------------------------------------------------------------------
+# LoRA config
+# ---------------------------------------------------------------------------
 
 peft_config = LoraConfig(
     r=cfg.lora_r,
@@ -90,9 +107,13 @@ peft_config = LoraConfig(
 )
 
 
+# ---------------------------------------------------------------------------
+# Data formatting
+# ---------------------------------------------------------------------------
+
 SYSTEM_PROMPT = (
     "You are a multilingual stand-up comedian. "
-    "You write short, original jokes in English"
+    "You write short, original jokes in English. "
     "You ALWAYS obey the user’s constraints exactly (word inclusion, topic, language). "
     "You prefer concise setups and strong punchlines."
 )
@@ -108,12 +129,18 @@ def build_text(example: Dict[str, Any]) -> Dict[str, Any]:
     example["text"] = text
     return example
 
+
 def prepare_split(split_ds):
     split_ds = split_ds.map(build_text)
     cols = [c for c in split_ds.column_names if c != "text"]
     if cols:
         split_ds = split_ds.remove_columns(cols)
     return split_ds
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 def main():
     global model, tokenizer
@@ -138,22 +165,26 @@ def main():
         warmup_ratio=cfg.warmup_ratio,
         weight_decay=cfg.weight_decay,
         logging_steps=cfg.logging_steps,
+
         save_strategy=cfg.save_strategy,
         save_steps=cfg.eval_steps,
         eval_strategy=cfg.eval_strategy,
         eval_steps=cfg.eval_steps,
+
         lr_scheduler_type="cosine",
-        optim="adamw_bnb_8bit", # better optimizer
+        optim="adamw_torch",          # <--- standard AdamW, no 8-bit
         seed=cfg.seed,
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        bf16=False,
-        fp16=False,
+
+        bf16=False,                   # <--- disable bf16 AMP
+        fp16=torch.cuda.is_available(),  # <--- enable fp16 AMP if CUDA
+
         report_to=[],
         max_length=cfg.max_seq_length,
         dataset_text_field="text",
-        packing=True, # short inputs -> packing to reduce padding
+        packing=True,                 # pack short samples to reduce padding
     )
 
     trainer = SFTTrainer(
@@ -177,7 +208,7 @@ def main():
     if "eval_loss" in eval_metrics:
         try:
             print("Perplexity:", math.exp(eval_metrics["eval_loss"]))
-        except:
+        except OverflowError:
             print("Perplexity overflow")
 
     print("Saving adapter and tokenizer...")
@@ -194,5 +225,6 @@ def main():
     print("Zipping model to:", zip_path)
     import subprocess
     subprocess.run(["zip", "-r", zip_path, full_out], check=True)
+
 
 main()
