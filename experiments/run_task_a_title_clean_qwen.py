@@ -62,8 +62,11 @@ cfg = InferenceConfig()
 SYSTEM_PROMPT = (
     "You are a stand-up comedian. Write ONE original joke in English for the user headline. "
     "Return exactly one line under 30 words. No preface, no explanation, no emojis. "
+    "Do NOT include any role labels or speaker tags (for example: assistant, user, system). "
+    "Do NOT start with 'assistant' or 'assistant:'. Output only the joke text. "
     "Follow user constraints. Avoid hate, slurs, explicit sex, and graphic violence."
 )
+
 
 
 # ---------------------------------------------------------------------------
