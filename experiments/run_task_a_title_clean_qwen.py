@@ -151,12 +151,15 @@ def build_chat_prompt(tokenizer, user_prompt: str) -> str:
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
+        {"role": "assistant", "content": ""},
     ]
-    return tokenizer.apply_chat_template(
+    text = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
-        add_generation_prompt=True,
+        # IMPORTANT: do not add another generation prompt (we already included assistant)
+        add_generation_prompt=False,
     )
+    return text
 
 
 def batched(items: List[int], batch_size: int) -> Iterable[List[int]]:
