@@ -5,11 +5,13 @@ import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Tuple, Optional
+from typing import Iterable, List, Tuple
 
 import torch
 import pandas as pd
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+import prompt_builder as pb
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +49,7 @@ class InferenceConfig:
     # Throughput
     batch_size: int = 16
 
-    # “Zero empty cells” + “must include both words” policy
+    # “Zero empty cells” + “must include both words”
     max_retries: int = 2
     retry_settings: Tuple[Tuple[float, float, int], ...] = (
         (0.95, 0.98, 40),
@@ -58,13 +60,6 @@ class InferenceConfig:
 
 
 cfg = InferenceConfig()
-
-SYSTEM_PROMPT = (
-    "You are a stand-up comedian. Write ONE original joke in English. "
-    "Return exactly one line under 30 words. No preface, no explanation, no emojis. "
-    "Do not output any chat markers, speaker labels, or formatting headers. Output only the joke text. "
-    "Avoid hate, slurs, explicit sex, and graphic violence."
-)
 
 
 # ---------------------------------------------------------------------------
@@ -92,8 +87,8 @@ def load_model_and_tokenizer():
         trust_remote_code=True,
     )
 
+    # Decoder-only models: left padding is safer for batched generation
     tokenizer.padding_side = "left"
-
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -137,68 +132,55 @@ def load_model_and_tokenizer():
 
 
 # ---------------------------------------------------------------------------
-# Text helpers
+# Validation helpers
 # ---------------------------------------------------------------------------
 
-_whitespace_re = re.compile(r"\s+")
-
-def normalize_one_line(text: str) -> str:
-    if text is None:
-        return ""
-    text = str(text).replace("\n", " ").replace("\r", " ")
-    text = _whitespace_re.sub(" ", text).strip()
-    return text
-
-
-def safe_word(w: str) -> str:
-    return normalize_one_line(w).strip()
-
-
-def make_user_prompt_from_words(word1: str, word2: str) -> str:
-    w1 = safe_word(word1)
-    w2 = safe_word(word2)
-    return (
-        f"Write one joke that MUST include the two words exactly as written: '{w1}' and '{w2}'. "
-        "Use both words as normal words in the joke. One line only."
-    )
-
-
-def make_retry_prompt_from_words(word1: str, word2: str) -> str:
-    w1 = safe_word(word1)
-    w2 = safe_word(word2)
-    return (
-        f"Write one joke. REQUIRED: include '{w1}' and '{w2}' exactly. "
-        "If you miss either word, the answer is wrong. One line only."
-    )
-
+def _boundary_pattern(phrase: str) -> re.Pattern:
+    """
+    Match the phrase as a standalone token/phrase, allowing punctuation around it.
+    Uses alphanumeric boundaries (works better than \\b for hyphens/spaces).
+    """
+    p = re.escape(pb.safe_word(phrase))
+    return re.compile(rf"(?<![A-Za-z0-9]){p}(?![A-Za-z0-9])")
 
 def required_words_present(text: str, word1: str, word2: str) -> bool:
-    t = normalize_one_line(text).lower()
-    w1 = re.escape(safe_word(word1).lower())
-    w2 = re.escape(safe_word(word2).lower())
+    t = pb.normalize_one_line(text)
+    if not t:
+        return False
+    w1 = pb.safe_word(word1)
+    w2 = pb.safe_word(word2)
+    if not w1 or not w2:
+        return False
 
-    # whole-word match
-    p1 = re.search(rf"\b{w1}\b", t) is not None
-    p2 = re.search(rf"\b{w2}\b", t) is not None
+    p1 = _boundary_pattern(w1).search(t) is not None
+    p2 = _boundary_pattern(w2).search(t) is not None
     return p1 and p2
 
 
 def fallback_joke(word1: str, word2: str) -> str:
     # Guaranteed inclusion, one line, short.
-    w1 = safe_word(word1)
-    w2 = safe_word(word2)
-    return normalize_one_line(f"I brought a {w1} to a {w2} meeting; both were unqualified, but somehow still got promoted.")
+    w1 = pb.safe_word(word1)
+    w2 = pb.safe_word(word2)
+    return pb.normalize_one_line(
+        f"I brought a {w1} to a {w2} meeting; both were unqualified, but somehow still got promoted."
+    )
 
 
 # ---------------------------------------------------------------------------
-# Chat prompt
+# Prompt building (delegated to prompt_builder.py)
 # ---------------------------------------------------------------------------
 
-def build_chat_prompt(tokenizer, user_prompt: str) -> str:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
-    ]
+def build_chat_text(tokenizer, word1: str, word2: str, strict_suffix: str = "") -> str:
+    """
+    Uses prompt_builder.build_joke_messages() and converts to a model-ready chat template string.
+    strict_suffix optionally appends extra instruction for retries.
+    """
+    messages = pb.build_joke_messages(word1, word2)
+    if strict_suffix:
+        # Append extra constraint to the user message without re-implementing the builder logic.
+        messages = [dict(messages[0]), dict(messages[1])]
+        messages[1]["content"] = pb.normalize_one_line(messages[1]["content"] + "\n" + strict_suffix)
+
     return tokenizer.apply_chat_template(
         messages,
         tokenize=False,
@@ -212,11 +194,11 @@ def build_chat_prompt(tokenizer, user_prompt: str) -> str:
 
 def batched(items: List[int], batch_size: int) -> Iterable[List[int]]:
     for i in range(0, len(items), batch_size):
-        yield items[i: i + batch_size]
+        yield items[i : i + batch_size]
 
 
-def order_by_length(prompts: List[str]) -> List[int]:
-    return sorted(range(len(prompts)), key=lambda i: len(prompts[i]))
+def order_by_length(texts: List[str]) -> List[int]:
+    return sorted(range(len(texts)), key=lambda i: len(texts[i]))
 
 
 # ---------------------------------------------------------------------------
@@ -227,16 +209,14 @@ def order_by_length(prompts: List[str]) -> List[int]:
 def generate_batch_once(
     model,
     tokenizer,
-    batch_prompts: List[str],
+    chat_texts: List[str],
     temperature: float,
     top_p: float,
     max_new_tokens: int,
     min_new_tokens: int,
 ) -> List[str]:
-    texts = [build_chat_prompt(tokenizer, p) for p in batch_prompts]
-
     inputs = tokenizer(
-        texts,
+        chat_texts,
         return_tensors="pt",
         padding=True,
         truncation=True,
@@ -271,7 +251,7 @@ def generate_batch_once(
 
     new_tokens = gen_ids[:, prompt_len:]
     decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-    return [normalize_one_line(x) for x in decoded]
+    return [pb.normalize_one_line(x) for x in decoded]
 
 
 @torch.inference_mode()
@@ -283,20 +263,25 @@ def generate_word_inclusion_predictions(
     batch_size: int,
 ) -> List[str]:
     n = len(word1_list)
-    prompts = [make_user_prompt_from_words(word1_list[i], word2_list[i]) for i in range(n)]
+
+    # Build initial chat texts (includes micro-cards/facts from prompt_builder)
+    chat_texts = [
+        build_chat_text(tokenizer, word1_list[i], word2_list[i])
+        for i in range(n)
+    ]
 
     outputs: List[str] = [""] * n
-    order = order_by_length(prompts)
+    order = order_by_length(chat_texts)
     start_all = time.time()
 
     for batch_index, batch_ids in enumerate(batched(order, batch_size), start=1):
-        batch_prompts = [prompts[i] for i in batch_ids]
+        batch_texts = [chat_texts[i] for i in batch_ids]
         print(f"\n[Batch {batch_index}] size={len(batch_ids)}")
 
         batch_out = generate_batch_once(
             model=model,
             tokenizer=tokenizer,
-            batch_prompts=batch_prompts,
+            chat_texts=batch_texts,
             temperature=cfg.temperature,
             top_p=cfg.top_p,
             max_new_tokens=cfg.max_new_tokens,
@@ -308,12 +293,14 @@ def generate_word_inclusion_predictions(
 
     def is_good(i: int) -> bool:
         t = outputs[i]
-        if normalize_one_line(t) == "":
+        if pb.normalize_one_line(t) == "":
             return False
         return required_words_present(t, word1_list[i], word2_list[i])
 
     bad_indices = [i for i in range(n) if not is_good(i)]
     print(f"\nInitial failures (empty or missing required words): {len(bad_indices)}")
+
+    strict_suffix = "IMPORTANT: The joke is INVALID unless it includes BOTH required words exactly as written."
 
     for retry_round, (temp, tp, mx) in enumerate(cfg.retry_settings[: cfg.max_retries], start=1):
         if not bad_indices:
@@ -321,17 +308,20 @@ def generate_word_inclusion_predictions(
 
         print(f"\nRetry round {retry_round}: temperature={temp}, top_p={tp}, max_new_tokens={mx}")
 
-        retry_prompts = [make_retry_prompt_from_words(word1_list[i], word2_list[i]) for i in bad_indices]
-        retry_order = order_by_length(retry_prompts)
+        retry_texts = [
+            build_chat_text(tokenizer, word1_list[i], word2_list[i], strict_suffix=strict_suffix)
+            for i in bad_indices
+        ]
+        retry_order = order_by_length(retry_texts)
 
         retry_out_all: List[str] = []
         for chunk_ids in batched(retry_order, batch_size):
-            chunk_prompts = [retry_prompts[k] for k in chunk_ids]
+            chunk_texts = [retry_texts[k] for k in chunk_ids]
             retry_out_all.extend(
                 generate_batch_once(
                     model=model,
                     tokenizer=tokenizer,
-                    batch_prompts=chunk_prompts,
+                    chat_texts=chunk_texts,
                     temperature=temp,
                     top_p=tp,
                     max_new_tokens=mx,
@@ -340,14 +330,14 @@ def generate_word_inclusion_predictions(
             )
 
         # Map retry outputs back to bad_indices
-        retry_out = [""] * len(retry_prompts)
+        retry_out = [""] * len(retry_texts)
         for pos, k in enumerate(retry_order):
             retry_out[k] = retry_out_all[pos]
 
         new_bad: List[int] = []
         for idx_pos, original_i in enumerate(bad_indices):
-            candidate = normalize_one_line(retry_out[idx_pos])
-            if candidate != "" and required_words_present(candidate, word1_list[original_i], word2_list[original_i]):
+            candidate = pb.normalize_one_line(retry_out[idx_pos])
+            if candidate and required_words_present(candidate, word1_list[original_i], word2_list[original_i]):
                 outputs[original_i] = candidate
             else:
                 new_bad.append(original_i)
@@ -361,8 +351,10 @@ def generate_word_inclusion_predictions(
         for i in bad_indices:
             outputs[i] = fallback_joke(word1_list[i], word2_list[i])
 
-    # Assert compliance
-    still_bad = [i for i in range(n) if normalize_one_line(outputs[i]) == "" or not required_words_present(outputs[i], word1_list[i], word2_list[i])]
+    still_bad = [
+        i for i in range(n)
+        if pb.normalize_one_line(outputs[i]) == "" or not required_words_present(outputs[i], word1_list[i], word2_list[i])
+    ]
     if still_bad:
         raise RuntimeError(f"Validation failed for indices: {still_bad[:20]}")
 
@@ -450,7 +442,7 @@ def main():
     df_out["prediction"] = predictions
 
     # Final validation
-    empty_count = (df_out["prediction"].astype(str).map(normalize_one_line) == "").sum()
+    empty_count = (df_out["prediction"].astype(str).map(pb.normalize_one_line) == "").sum()
     if empty_count != 0:
         raise RuntimeError(f"Requirement failed: {empty_count} empty predictions")
 
