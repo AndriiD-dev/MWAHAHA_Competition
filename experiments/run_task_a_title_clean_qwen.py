@@ -5,7 +5,7 @@ import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Tuple, Optional
 
 import torch
 import pandas as pd
@@ -59,14 +59,13 @@ class InferenceConfig:
 cfg = InferenceConfig()
 
 # Short system prompt = less compute per sample, usually no quality loss for one-line punchlines
+# Fix 1: Do not include literal role words like "assistant", "user", "system" as examples in the prompt.
 SYSTEM_PROMPT = (
-    "You are a stand-up comedian. Write ONE original joke in English for the user headline. "
+    "You are a stand-up comedian. Write ONE original joke in English inspired by the headline. "
     "Return exactly one line under 30 words. No preface, no explanation, no emojis. "
-    "Do NOT include any role labels or speaker tags (for example: assistant, user, system). "
-    "Do NOT start with 'assistant' or 'assistant:'. Output only the joke text. "
+    "Do not output any chat markers, speaker labels, or formatting headers. Output only the joke text. "
     "Follow user constraints. Avoid hate, slurs, explicit sex, and graphic violence."
 )
-
 
 
 # ---------------------------------------------------------------------------
@@ -147,17 +146,59 @@ def load_model_and_tokenizer():
 # Prompt + batching
 # ---------------------------------------------------------------------------
 
+# Fix 3: Improve headline relevance by forcing inclusion of at least one keyword from the headline.
+_STOPWORDS = {
+    "the", "a", "an", "and", "or", "but", "if", "then", "else", "when", "while",
+    "to", "of", "in", "on", "for", "at", "by", "with", "from", "as",
+    "is", "are", "was", "were", "be", "been", "being",
+    "it", "its", "this", "that", "these", "those",
+}
+
+def extract_keywords(headline: str, k: int = 3) -> List[str]:
+    words = re.findall(r"[A-Za-z]+", headline.lower())
+    words = [w for w in words if len(w) >= 4 and w not in _STOPWORDS]
+
+    out: List[str] = []
+    for w in words:
+        if w not in out:
+            out.append(w)
+        if len(out) >= k:
+            break
+    return out
+
+
+_whitespace_re = re.compile(r"\s+")
+
+def normalize_one_line(text: str) -> str:
+    if text is None:
+        return ""
+    text = str(text).replace("\n", " ").replace("\r", " ")
+    text = _whitespace_re.sub(" ", text).strip()
+    return text
+
+
+def make_user_prompt_from_headline(headline: str) -> str:
+    h = normalize_one_line(headline)
+    kws = extract_keywords(h, k=3)
+    if kws:
+        return (
+            f"Headline: {h}\n"
+            f"Write one joke inspired by the headline. "
+            f"Include at least one of these words: {', '.join(kws)}."
+        )
+    return f"Headline: {h}\nWrite one joke inspired by the headline."
+
+
+# Fix 1: Do not add an explicit assistant message; let the chat template add the generation prompt.
 def build_chat_prompt(tokenizer, user_prompt: str) -> str:
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
-        {"role": "assistant", "content": ""},
     ]
     text = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
-        # IMPORTANT: do not add another generation prompt (we already included assistant)
-        add_generation_prompt=False,
+        add_generation_prompt=True,
     )
     return text
 
@@ -181,18 +222,8 @@ def order_by_length(prompts: List[str]) -> Tuple[List[int], List[int]]:
 
 
 # ---------------------------------------------------------------------------
-# Postprocessing + fallback (guarantees non-empty)
+# Fallback (guarantees non-empty)
 # ---------------------------------------------------------------------------
-
-_whitespace_re = re.compile(r"\s+")
-
-def normalize_one_line(text: str) -> str:
-    if text is None:
-        return ""
-    text = str(text).replace("\n", " ").replace("\r", " ")
-    text = _whitespace_re.sub(" ", text).strip()
-    return text
-
 
 def fallback_punchline(headline: str) -> str:
     h = normalize_one_line(headline)
@@ -224,11 +255,19 @@ def generate_batch_once(
         truncation=True,
     )
 
-    # Critical: lengths as Python ints (CPU) BEFORE moving tensors to GPU
-    input_lengths: List[int] = inputs["attention_mask"].sum(dim=1).tolist()
-
     input_ids = inputs["input_ids"].to(model.device)
     attention_mask = inputs["attention_mask"].to(model.device)
+
+    # Fix 2: Correct boundary for left-padded batches.
+    # The generated tokens begin after the padded prompt width, not after attention_mask.sum().
+    prompt_len = input_ids.shape[1]
+
+    # Fix 1: Block common chat markers / role words from being generated.
+    BAD_PHRASES = [
+        "assistant", "assistant:", "user", "user:", "system", "system:",
+        "assistant user", "<tool call>", "</tool call>",
+    ]
+    bad_words_ids = tokenizer(BAD_PHRASES, add_special_tokens=False).input_ids
 
     gen_ids = model.generate(
         input_ids=input_ids,
@@ -241,16 +280,12 @@ def generate_batch_once(
         pad_token_id=tokenizer.pad_token_id,
         eos_token_id=tokenizer.eos_token_id,
         use_cache=True,
+        bad_words_ids=bad_words_ids,
     )
 
-    outputs: List[str] = []
-    for i in range(len(batch_prompts)):
-        start = int(input_lengths[i])
-        new_tokens = gen_ids[i, start:]
-        resp = tokenizer.decode(new_tokens, skip_special_tokens=True)
-        outputs.append(normalize_one_line(resp))
-
-    return outputs
+    new_tokens = gen_ids[:, prompt_len:]
+    decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
+    return [normalize_one_line(x) for x in decoded]
 
 
 @torch.inference_mode()
@@ -259,9 +294,13 @@ def generate_responses_strict_non_empty(
     tokenizer,
     prompts: List[str],
     batch_size: int,
+    fallback_headlines: Optional[List[str]] = None,
 ) -> List[str]:
     total = len(prompts)
     outputs_sorted: List[str] = [""] * total
+
+    if fallback_headlines is None:
+        fallback_headlines = prompts
 
     # Length bucketing = fewer padded tokens = less real GPU compute
     order, inv = order_by_length(prompts)
@@ -332,7 +371,7 @@ def generate_responses_strict_non_empty(
     if empty_indices:
         print(f"\nApplying fallback for remaining empties: {len(empty_indices)}")
         for idx in empty_indices:
-            outputs_sorted[idx] = fallback_punchline(prompts[idx])
+            outputs_sorted[idx] = fallback_punchline(fallback_headlines[idx])
 
     final_empty = [i for i, x in enumerate(outputs_sorted) if normalize_one_line(x) == ""]
     if final_empty:
@@ -403,7 +442,9 @@ def main():
         raise ValueError(f"'headline' column not found in {cfg.input_path}")
 
     df["headline"] = df["headline"].fillna("").astype(str)
-    prompts = df["headline"].tolist()
+
+    headlines = df["headline"].tolist()
+    prompts = [make_user_prompt_from_headline(h) for h in headlines]  # Fix 3
     print(f"Total prompts: {len(prompts)}")
 
     model, tokenizer = load_model_and_tokenizer()
@@ -413,6 +454,7 @@ def main():
         tokenizer=tokenizer,
         prompts=prompts,
         batch_size=cfg.batch_size,
+        fallback_headlines=headlines,
     )
 
     df_out = df.copy()
