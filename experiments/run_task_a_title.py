@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import re
 import time
 import zipfile
-from dataclasses import dataclass
+import inspect
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
@@ -24,6 +26,39 @@ OUTPUT_DIR = PROJECT_ROOT / "outputs"
 print("Project root:", PROJECT_ROOT)
 print("Data dir    :", DATA_DIR)
 print("Output dir  :", OUTPUT_DIR)
+
+
+# ---------------------------------------------------------------------------
+# Hugging Face authentication (for private repositories)
+# ---------------------------------------------------------------------------
+
+def get_hf_token() -> str | None:
+    return (
+        os.environ.get("HUGGINGFACE_HUB_TOKEN")
+        or os.environ.get("HF_TOKEN")
+        or os.environ.get("HUGGINGFACE_TOKEN")
+    )
+
+
+def hf_auth_kwargs(for_callable) -> dict:
+    """
+    Transformers and Hugging Face Hub changed parameter names across versions.
+    This filters keyword arguments to the ones supported by the callable.
+    """
+    tok = cfg.huggingface_token  # cfg is defined below
+    if not tok:
+        return {}
+
+    raw = {
+        "token": tok,            # newer
+        "use_auth_token": tok,   # older
+    }
+
+    try:
+        params = inspect.signature(for_callable).parameters
+        return {k: v for k, v in raw.items() if k in params}
+    except Exception:
+        return {"token": tok}
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +102,9 @@ class InferenceConfig:
     )
 
     drive_output_dir: str = "/content/drive/MyDrive/MWAHAHA_outputs"
+
+    # Token is required if your adapter repository is private
+    huggingface_token: str | None = field(default_factory=get_hf_token)
 
 
 cfg = InferenceConfig()
@@ -113,7 +151,11 @@ def load_tokenizer():
     for src in sources:
         try:
             print("Loading tokenizer from:", src)
-            tokenizer = AutoTokenizer.from_pretrained(src, trust_remote_code=True)
+            tokenizer = AutoTokenizer.from_pretrained(
+                src,
+                trust_remote_code=True,
+                **hf_auth_kwargs(AutoTokenizer.from_pretrained),
+            )
             tokenizer.padding_side = "left"
             if tokenizer.pad_token is None:
                 tokenizer.pad_token = tokenizer.eos_token
@@ -150,6 +192,7 @@ def load_model_and_tokenizer():
                 device_map=device_map,
                 trust_remote_code=True,
                 attn_implementation=attn_impl,
+                **hf_auth_kwargs(AutoModelForCausalLM.from_pretrained),
             )
             break
         except Exception as e:
@@ -168,6 +211,7 @@ def load_model_and_tokenizer():
         base_model,
         adapter_source,
         is_trainable=False,
+        **hf_auth_kwargs(PeftModel.from_pretrained),
     )
 
     if cfg.merge_adapter:
