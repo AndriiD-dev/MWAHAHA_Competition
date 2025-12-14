@@ -160,7 +160,7 @@ class InferenceConfig:
     batch_size: int = 16
 
     # Retries for final jokes only
-    max_retries: int = 2
+    max_retries: int = 20
     retry_settings: Tuple[Tuple[float, float, int], ...] = (
         (0.95, 0.98, 40),
         (1.05, 0.98, 48),
