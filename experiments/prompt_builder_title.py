@@ -197,7 +197,7 @@ def build_final_messages(headline: str, noun1: str, noun2: str, plan_text: str) 
         f"Anchor nouns (must appear): '{n1}', '{n2}'.\n"
         f"PLAN (do not quote): {plan}\n\n"
         "Write the final joke now.\n"
-        "Constraints: one line, under 30 words, include BOTH anchor nouns exactly as written.\n"
+        "Constraints: one line, under 30 words, include BOTH anchor nouns (you may pluralize or use possessive).\n"
         "Output ONLY the joke."
     )
 
