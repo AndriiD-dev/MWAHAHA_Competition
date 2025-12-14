@@ -182,15 +182,6 @@ def build_final_messages(headline: str, noun1: str, noun2: str, plan_text: str) 
     n2 = safe_word(noun2)
     plan = normalize_one_line(plan_text)
 
-    # safe version
-    # system = (
-    #     "You are a stand-up comedian. Write ONE original joke in English.\n"
-    #     "Return exactly one line under 30 words. No preface, no explanation, no emojis.\n"
-    #     "Avoid hate, slurs, explicit sex, and graphic violence.\n"
-    #     "You may receive FACTS and PLAN blocks; use them only to guide the joke. Do not quote them."
-    # )
-
-    # more sharp version
     system = (
         "You are a stand-up comedian. Write ONE original joke in English.\n"
         "Return exactly one line under 30 words. No preface, no explanation, no emojis.\n"

@@ -190,36 +190,6 @@ def format_facts_block(word1: str, word2: str) -> str:
 # Prompt builders
 # -----------------------------
 
-def build_joke_messages(word1: str, word2: str) -> List[Dict[str, str]]:
-    """
-    Returns a list of chat messages (system + user) that you can pass to your model.
-    """
-    w1 = safe_word(word1)
-    w2 = safe_word(word2)
-
-    system = (
-        "You are a stand-up comedian. Write ONE original joke in English.\n"
-        "Return exactly one line under 30 words. No preface, no explanation, no emojis.\n"
-        "Avoid hate, slurs, explicit sex, and graphic violence.\n"
-        "You may receive a FACTS block; use it only to understand the words and do not quote it."
-    )
-
-
-    facts = format_facts_block(w1, w2)
-
-    user = (
-        f"{facts}\n\n"
-        "Write one joke that MUST include the two required words exactly as written.\n"
-        f"Required words: '{w1}' and '{w2}'. "
-        "Use both words naturally. One line only."
-    )
-
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ]
-
-
 def build_plan_messages(word1: str, word2: str) -> List[Dict[str, str]]:
     """
     Returns chat messages (system + user) for the planning step.
@@ -263,16 +233,6 @@ def build_final_messages(word1: str, word2: str, plan_text: str) -> List[Dict[st
     w2 = safe_word(word2)
     plan = normalize_one_line(plan_text)
 
-    # safe version
-    # system = (
-    #     "You are a stand-up comedian. Write ONE original joke in English.\n"
-    #     "Return exactly one line under 30 words. No preface, no explanation, no emojis.\n"
-    #     "Avoid hate, slurs, explicit sex, and graphic violence.\n"
-    #     "You may receive FACTS and PLAN blocks; use them only to understand the words and the intended angle. "
-    #     "Do not quote them."
-    # )
-
-    # more sharp version
     system = (
         "You are a stand-up comedian. Write ONE original joke in English.\n"
         "Return exactly one line under 30 words. No preface, no explanation, no emojis.\n"
