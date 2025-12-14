@@ -143,11 +143,41 @@ def load_model_and_tokenizer():
 
 def _boundary_pattern(phrase: str) -> re.Pattern:
     """
-    Match the phrase as a standalone token/phrase, allowing punctuation around it.
-    Uses alphanumeric boundaries (works better than \\b for hyphens/spaces).
+    Match the anchor noun as a standalone token/phrase, case-insensitively,
+    and allow simple morphological variants:
+
+    - plural: s / es
+    - y -> ies
+    - optional possessive: 's or ’s (also after plural)
+
+    For acronyms / very short tokens (<= 3), keep strict (no plural expansion).
     """
-    p = re.escape(pb.safe_word(phrase))
-    return re.compile(rf"(?<![A-Za-z0-9]){p}(?![A-Za-z0-9])")
+    base = pb.safe_word(phrase)
+
+    if not base:
+        # Match nothing
+        return re.compile(r"a^")
+
+    base_l = base.lower()
+
+    # Heuristic: treat very short tokens as acronyms/initialisms -> strict form only
+    if len(base_l) <= 3 or not base_l.isalpha():
+        p = re.escape(base_l)
+        return re.compile(rf"(?<![A-Za-z0-9]){p}(?![A-Za-z0-9])", flags=re.IGNORECASE)
+
+    # Build plural/inflection pattern
+    if base_l.endswith("y") and len(base_l) > 3:
+        # company -> company / companies
+        stem = re.escape(base_l[:-1])
+        core = rf"{stem}(?:y|ies)"
+    else:
+        # default pluralization: word / words / wordes (rare but ok) / watches (via es)
+        core = re.escape(base_l) + r"(?:s|es)?"
+
+    # Optional possessive (straight or curly apostrophe)
+    core = core + r"(?:'s|’s)?"
+
+    return re.compile(rf"(?<![A-Za-z0-9]){core}(?![A-Za-z0-9])", flags=re.IGNORECASE)
 
 
 def required_words_present(text: str, word1: str, word2: str) -> bool:
