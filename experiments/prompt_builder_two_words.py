@@ -204,6 +204,7 @@ def build_joke_messages(word1: str, word2: str) -> List[Dict[str, str]]:
         "You may receive a FACTS block; use it only to understand the words and do not quote it."
     )
 
+
     facts = format_facts_block(w1, w2)
 
     user = (
@@ -262,12 +263,22 @@ def build_final_messages(word1: str, word2: str, plan_text: str) -> List[Dict[st
     w2 = safe_word(word2)
     plan = normalize_one_line(plan_text)
 
+    # safe version
+    # system = (
+    #     "You are a stand-up comedian. Write ONE original joke in English.\n"
+    #     "Return exactly one line under 30 words. No preface, no explanation, no emojis.\n"
+    #     "Avoid hate, slurs, explicit sex, and graphic violence.\n"
+    #     "You may receive FACTS and PLAN blocks; use them only to understand the words and the intended angle. "
+    #     "Do not quote them."
+    # )
+
+    # more sharp version
     system = (
         "You are a stand-up comedian. Write ONE original joke in English.\n"
         "Return exactly one line under 30 words. No preface, no explanation, no emojis.\n"
-        "Avoid hate, slurs, explicit sex, and graphic violence.\n"
-        "You may receive FACTS and PLAN blocks; use them only to understand the words and the intended angle. "
-        "Do not quote them."
+        "Avoid slurs or hate toward protected groups. Avoid explicit sexual content and graphic violence. Mild innuendo, flirting, and cartoonish (non-graphic) mishaps are allowed.\n"
+        "Do not apologize or refuse; if the topic is sensitive, pivot to wordplay, absurdity, or self-deprecation and still deliver a joke.\n"
+        "You may receive FACTS and PLAN blocks; use them only to guide the joke. Do not quote them."
     )
 
     facts = format_facts_block(w1, w2)
