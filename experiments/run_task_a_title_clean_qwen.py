@@ -48,21 +48,19 @@ def choose_two_nouns_from_label(
     prefer_distinct: bool = True,
 ) -> tuple[str, str]:
     """
-    Takes text (here: a headline) and returns exactly two noun lemmas.
+    Takes text (headline) and returns exactly two noun lemmas.
 
-    - Extract NOUN / PROPN lemmas using spaCy.
-    - Remove trivial lemmas.
-    - Prefer distinct nouns; if not possible, duplicate the only one.
-    - If no nouns, fall back to adjectives/verbs, then alphabetic tokens.
+    Strategy:
+    1) Extract NOUN / PROPN lemmas using spaCy.
+    2) Remove trivial lemmas.
+    3) Prefer two distinct nouns. If not possible, duplicate the only one available.
+    4) If zero nouns, fall back to content words (adjectives/verbs) or finally random tokens.
     """
     global _NLP
     if _NLP is None:
         _NLP = _load_spacy_model()
 
-    if seed is not None:
-        rnd = random.Random(seed)
-    else:
-        rnd = random
+    rnd = random.Random(seed) if seed is not None else random
 
     text = (gt_text_label or "").strip()
     if not text:
@@ -159,9 +157,25 @@ class InferenceConfig:
 
     batch_size: int = 16
 
-    # Retries for final jokes only
+    # Retries for final jokes
     max_retries: int = 20
+
+    # Redo planning every N retries for remaining failures
+    replan_every: int = 3
+
     retry_settings: Tuple[Tuple[float, float, int], ...] = (
+        (0.90, 0.95, 40),
+        (0.95, 0.98, 40),
+        (1.00, 0.98, 48),
+        (1.05, 0.98, 48),
+        (0.90, 0.95, 40),
+        (0.95, 0.98, 40),
+        (1.00, 0.98, 48),
+        (1.05, 0.98, 48),
+        (0.90, 0.95, 40),
+        (0.95, 0.98, 40),
+        (1.00, 0.98, 48),
+        (1.05, 0.98, 48),
         (0.90, 0.95, 40),
         (0.95, 0.98, 40),
         (1.00, 0.98, 48),
@@ -170,18 +184,6 @@ class InferenceConfig:
         (1.15, 0.99, 64),
         (1.20, 0.99, 72),
         (1.25, 0.99, 80),
-        (1.30, 1.00, 96),
-        (1.35, 1.00, 96),
-        (1.40, 1.00, 112),
-        (1.45, 1.00, 112),
-        (1.50, 1.00, 128),
-        (1.55, 1.00, 128),
-        (1.60, 1.00, 128),
-        (1.65, 1.00, 128),
-        (1.70, 1.00, 128),
-        (1.75, 1.00, 128),
-        (1.80, 1.00, 128),
-        (1.85, 1.00, 128),
     )
 
     drive_output_dir: str = "/content/drive/MyDrive/MWAHAHA_outputs"
@@ -288,7 +290,9 @@ def fallback_joke(headline: str, noun1: str, noun2: str) -> str:
     n2 = pb.safe_word(noun2) or "headline"
     if not h:
         return pb.normalize_one_line(f"My {n1} met a {n2}; somehow both still made the evening news.")
-    return pb.normalize_one_line(f"After '{h}', my {n1} hired a {n2} for public relations. It went exactly as well as you think.")
+    return pb.normalize_one_line(
+        f"After '{h}', my {n1} hired a {n2} for public relations. It went exactly as well as you think."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -454,13 +458,14 @@ def generate_headline_predictions_with_plans(
         "Output only the joke."
     )
 
-    # Retry final only (keep plan fixed)
+    # Retry final, but redo planning every cfg.replan_every retries for the remaining failures
     for retry_round, (temp, tp, mx) in enumerate(cfg.retry_settings[: cfg.max_retries], start=1):
         if not bad_indices:
             break
 
         print(f"\nFINAL retry round {retry_round}: temperature={temp}, top_p={tp}, max_new_tokens={mx}")
 
+        # Retry FINAL for current failures
         retry_texts = []
         for i in bad_indices:
             msgs = pb.build_final_messages(headlines[i], noun1_list[i], noun2_list[i], plans[i])
@@ -490,6 +495,65 @@ def generate_headline_predictions_with_plans(
 
         bad_indices = new_bad
         print(f"Final failures after retry round {retry_round}: {len(bad_indices)}")
+
+        if not bad_indices:
+            break
+
+        # Every N retries: regenerate PLAN for remaining failures, then immediately try FINAL once
+        if cfg.replan_every > 0 and (retry_round % cfg.replan_every == 0):
+            print(f"\nReplanning for remaining failures (every {cfg.replan_every} retries): {len(bad_indices)}")
+
+            replan_texts = [
+                to_chat_text(tokenizer, pb.build_plan_messages(headlines[i], noun1_list[i], noun2_list[i]))
+                for i in bad_indices
+            ]
+            replan_out = generate_all(
+                model=model,
+                tokenizer=tokenizer,
+                chat_texts=replan_texts,
+                batch_size=batch_size,
+                temperature=cfg.plan_temperature,
+                top_p=cfg.plan_top_p,
+                max_new_tokens=cfg.plan_max_new_tokens,
+                min_new_tokens=cfg.plan_min_new_tokens,
+                label=f"REPLAN {retry_round}",
+            )
+
+            for pos, i in enumerate(bad_indices):
+                plan_candidate = pb.normalize_one_line(replan_out[pos])
+                plans[i] = plan_candidate if plan_candidate else fallback_plan()
+
+            print("\nImmediate FINAL retry after replanning")
+
+            retry_texts_2 = []
+            for i in bad_indices:
+                msgs = pb.build_final_messages(headlines[i], noun1_list[i], noun2_list[i], plans[i])
+                msgs = [dict(msgs[0]), dict(msgs[1])]
+                msgs[1]["content"] = pb.normalize_one_line(msgs[1]["content"] + "\n" + strict_suffix)
+                retry_texts_2.append(to_chat_text(tokenizer, msgs))
+
+            retry_out_2 = generate_all(
+                model=model,
+                tokenizer=tokenizer,
+                chat_texts=retry_texts_2,
+                batch_size=batch_size,
+                temperature=temp,
+                top_p=tp,
+                max_new_tokens=mx,
+                min_new_tokens=max(cfg.min_new_tokens, 8),
+                label=f"FINAL AFTER REPLAN {retry_round}",
+            )
+
+            new_bad_2: List[int] = []
+            for pos, i in enumerate(bad_indices):
+                candidate = pb.normalize_one_line(retry_out_2[pos])
+                if candidate and anchor_nouns_present(candidate, noun1_list[i], noun2_list[i]):
+                    outputs[i] = candidate
+                else:
+                    new_bad_2.append(i)
+
+            bad_indices = new_bad_2
+            print(f"Final failures after replanning at round {retry_round}: {len(bad_indices)}")
 
     # Final guarantee
     if bad_indices:
@@ -560,7 +624,7 @@ def main():
     configure_fast_kernels()
 
     print("Loading data from:", cfg.input_path)
-    # Your earlier scripts read task-a-title.csv using tab separator
+    # Your earlier scripts used a tab separator for this file
     df = pd.read_csv(cfg.input_path, sep="\t", keep_default_na=False)
 
     if "headline" not in df.columns:
@@ -590,9 +654,11 @@ def main():
     )
 
     df_out = df.copy()
-    # Optional: keep anchors for debugging. Remove if submission format is strict.
+
+    # If your submission format is strict, comment out the next two lines.
     df_out["noun1"] = noun1_list
     df_out["noun2"] = noun2_list
+
     df_out["prediction"] = predictions
 
     empty_count = (df_out["prediction"].astype(str).map(pb.normalize_one_line) == "").sum()
