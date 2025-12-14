@@ -56,10 +56,13 @@ class InferenceConfig:
     batch_size: int = 16
 
     # “Zero empty cells” + “must include both words” (applies to final jokes)
-    max_retries: int = 2
+    max_retries: int = 5
     retry_settings: Tuple[Tuple[float, float, int], ...] = (
+        (0.90, 0.95, 40),
         (0.95, 0.98, 40),
+        (1.00, 0.98, 48),
         (1.05, 0.98, 48),
+        (0.90, 0.95, 40),
     )
 
     drive_output_dir: str = "/content/drive/MyDrive/MWAHAHA_outputs"
