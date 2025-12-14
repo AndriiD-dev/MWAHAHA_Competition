@@ -1,0 +1,112 @@
+Unnamed: 0	id	word1	word2	headline	prediction	p_not_joke	p_joke	model_pred	certainty
+100	en_0101	spray	chair	-	I thought my chair was comfortable, but then someone sprayed it with cleaning solution! Who needs massage when you've got chair spray?	0.038342125713825226	0.9616578817367554	1	0.9616578817367554
+101	en_0102	hammer	banana	-	Why did the hammer buy a banana? To crack its fist-sized fist!	0.0012477790005505085	0.998752236366272	1	0.998752236366272
+102	en_0103	move	fridge	-	Why did the fridge join the gym? To lose some weight and move!	0.0058538890443742275	0.9941461086273193	1	0.9941461086273193
+103	en_0104	hammer	pumpkin	-	Carpenter: I brought my trusty hammer... to carve the pumpkin. Oh boy, did that go south!	0.007838254794478416	0.9921616911888123	1	0.9921616911888123
+104	en_0105	peel	pumpkin	-	Why did the pumpkin need a new peel? Because its old one had gone for a bit too much carve-in.	0.008392185904085636	0.9916077852249146	1	0.9916077852249146
+105	en_0106	microwave	book	-	Microwave contains a book? I thought you were heating up some tea!	0.040113259106874466	0.9598867893218994	1	0.9598867893218994
+106	en_0107	spray	door	-	Why did the door spray its owner with water? Because it forgot he had the keys!	0.0017809600103646517	0.9982190728187561	1	0.9982190728187561
+107	en_0108	measure	pizza	-	Delivery guy: Large pizza measures 16 inches? Who measures pizzas by inches?! By slices!	0.0030451484490185976	0.9969547986984253	1	0.9969547986984253
+108	en_0109	unplug	fridge	-	Why did my husband unplug the fridge? Because it was making too much sound!	0.0010903162183240056	0.9989097118377686	1	0.9989097118377686
+109	en_0110	weigh	phone	-	Why do my phone calls always feel so heavy? Because they weigh me down when I'm on shaky sidewalks.	0.001315605011768639	0.9986843466758728	1	0.9986843466758728
+110	en_0111	deseed	tomato	-	"Deseeding tomatoes with a knife is slower and messier. But why not just say ""deseed""? Mess-free and all."	0.027623865753412247	0.9723761081695557	1	0.9723761081695557
+111	en_0112	spray	cup	-	Why did the cup go to therapy? It had a serious spray issue!	0.002011449309065938	0.9979885816574097	1	0.9979885816574097
+112	en_0113	close	blender	-	Guy: Why did the blender close its eyes? It was blending tears!	0.001344894291833043	0.9986550807952881	1	0.9986550807952881
+113	en_0114	hammer	tomato	-	Guy: I tried to slice this tomato with a hammer! It just squished it harder!	0.0019743340089917183	0.99802565574646	1	0.99802565574646
+114	en_0115	blend	pumpkin	-	Chef: And don't forget, blend in some pumpkin for flavor! It's like a pie in a bowl!	0.4333147406578064	0.5666851997375488	1	0.5666851997375488
+115	en_0116	microwave	laptop	-	Why did the man bring his microwave to the laptop store? Because he heard they fix broken laptops!	0.0012185228988528252	0.9987815022468567	1	0.9987815022468567
+116	en_0117	drill	eggs	-	Chef: You'd think I’d want a drill for eggs, but it’s actually way too slow.	0.006499676965177059	0.993500292301178	1	0.993500292301178
+117	en_0118	peel	coconut	-	Why did the coconut call the other coconut on its phone? To peel some issues!	0.0013785423943772912	0.9986214637756348	1	0.9986214637756348
+118	en_0119	cut	shoes	-	Cut! Why did the man say his shoes were cutting? Because he slipped on them and fell flat!	0.0018254189053550363	0.9981745481491089	1	0.9981745481491089
+119	en_0120	weigh	watermelon	-	Waiter: You're gonna weigh this? Watermelon? It's a melon, dude!	0.004784340970218182	0.995215654373169	1	0.995215654373169
+120	en_0121	hammer	fridge	-	Why did the man bring a hammer to fix his fridge? Because a screwdriver would've been such a drill-down approach!	0.0011228946968913078	0.9988771080970764	1	0.9988771080970764
+121	en_0122	open	blender	-	Blender opens wide, ice cream falls out, hits the ceiling, starts melting, drips down the walls. I thought it was just an open-faced sandwich	0.14921681582927704	0.8507831692695618	1	0.8507831692695618
+122	en_0123	cut	coconut	-	Why did the coconut go to the doctor? Because it had a cut on its nut!	0.001279892516322434	0.9987201690673828	1	0.9987201690673828
+123	en_0124	measure	bacon	-	Measure your bacon right, or you might get slapped silly!	0.06195536255836487	0.9380446672439575	1	0.9380446672439575
+124	en_0125	drop	fridge	-	Why did the fridge drop dead? Because it was overcooling everything, even itself!	0.0017416069749742746	0.9982584118843079	1	0.9982584118843079
+125	en_0126	measure	pumpkin	-	How do you weigh a pumpkin? With a scale, measure!	0.019773833453655243	0.9802261590957642	1	0.9802261590957642
+126	en_0127	cut	laptop	-	Why did the laptop go on a diet? Because it heard someone say cut the grass AND use a laptop!	0.0014851762680336833	0.9985148310661316	1	0.9985148310661316
+127	en_0128	wash	keyboard	-	Tech says wash keyboard if dirty. I said I've already washed mine.	0.03379162400960922	0.9662083983421326	1	0.9662083983421326
+128	en_0129	shake	tree	-	Why did the apple shake its tree? To get out of that slippery grip!	0.015833362936973572	0.9841666221618652	1	0.9841666221618652
+129	en_0130	roll	potato	-	Why did the potato roll through the checkout line? Because it saw cashier potatoes rolling!	0.0012206895044073462	0.9987793564796448	1	0.9987793564796448
+130	en_0131	throw	phone	-	Why did the phone decide to throw itself out of the window? To get away from all the calls!	0.0045648375526070595	0.9954351782798767	1	0.9954351782798767
+131	en_0132	throw	orange	-	Street performer throws an orange, but meant to say he's juggling - got everyone fooled!	0.16767214238643646	0.8323278427124023	1	0.8323278427124023
+132	en_0133	fry	phone	-	Why did the fried phone hang up on its caller? Because it didn't wanna fry any more!	0.0011485766153782606	0.9988514184951782	1	0.9988514184951782
+133	en_0134	hammer	microwave	-	Why did the microwave need a new hammer? It lost its screws, tried to fix itself with a hammer!	0.0013743070885539055	0.9986257553100586	1	0.9986257553100586
+134	en_0135	unplug	phone	-	Why did the phone unplug itself before bed? It heard a lot on that phone!	0.0017254040576517582	0.998274564743042	1	0.998274564743042
+135	en_0136	weigh	pumpkin	-	Why did the farmer weigh his pumpkin? To make sure it wasn't kilopumpkin!	0.0009872744558379054	0.9990127086639404	1	0.9990127086639404
+136	en_0137	measure	microwave	-	Microwave, please measure the soup before it gets all heated up!	0.5288403034210205	0.4711596369743347	0	0.5288403034210205
+137	en_0138	weigh	tomato	-	Why did the tomato go to the doctor? To weigh itself, it felt kinda slimy!	0.0011312819551676512	0.9988686442375183	1	0.9988686442375183
+138	en_0139	measure	watermelon	-	Bartender: Hold the watermelon, I'm measuring! Just kidding, I'm pouring way too much on this drink. Measure again, please!	0.012566687539219856	0.9874332547187805	1	0.9874332547187805
+139	en_0140	throw	spoon	-	Throw the spoon as if it’s a delicate gesture, I swear, no one was trying to hit anyone.	0.39548081159591675	0.6045191884040833	1	0.6045191884040833
+140	en_0141	microwave	shoes	-	Microwave the shoes? Seriously, why would anyone do that? It's like trying to heat up a snowball in your microwave!	0.04053794592618942	0.9594619870185852	1	0.9594619870185852
+141	en_0142	throw	shirt	-	Man: Try it! Throw your shirt like I do! Girl: Sure, but watch this. Throws shirt far away.	0.029711460694670677	0.9702885150909424	1	0.9702885150909424
+142	en_0143	measure	oven	-	Chef: Don't worry, I'll show you how to measure flour correctly. Oven's got a digital display – just like a scale!	0.02015148662030697	0.9798485636711121	1	0.9798485636711121
+143	en_0144	drink	egg	-	"Guy orders egg salad drink. Chef fries an egg on top. Guy starts sneezing violently. Friend: ""You can't have eggs in your drink!"""	0.0031003658659756184	0.9968996047973633	1	0.9968996047973633
+144	en_0145	throw	cookie	-	Why did the cookie decide to take a walk? It heard there was a slippery slope and wanted to throw caution to the wind.	0.010181953199207783	0.9898180365562439	1	0.9898180365562439
+145	en_0146	blend	phone	-	Customer: Blends on the phone, please. Barista: Blending your world, sir!	0.0027052010409533978	0.9972948431968689	1	0.9972948431968689
+146	en_0147	hammer	car	-	Fixing car? You need a hammer, not a wrench, dawg! Got it wrong, buddy.	0.048700910061597824	0.9512991309165955	1	0.9512991309165955
+147	en_0148	drill	bottle	-	Man: I can't find my six-pack, did you see me drop it by the drill or bottle?	0.0038807401433587074	0.9961192607879639	1	0.9961192607879639
+148	en_0149	cut	towel	-	Cut the towel from your hair, it's still wet!	0.7999761700630188	0.2000238448381424	0	0.7999761700630188
+149	en_0150	hammer	shoes	-	Why did the man hammer his shoes? Because he wanted them to lace up by themselves!	0.0012638085754588246	0.9987362027168274	1	0.9987362027168274
+150	en_0151	hammer	egg	-	Why did the hammer need therapy? It had an egg-ustionary crush on the egg!	0.0012850264320150018	0.9987150430679321	1	0.9987150430679321
+151	en_0152	hammer	phone	-	Why did the phone die after the guy hit it with a hammer? Because it had a weak motherboard!	0.001028900733217597	0.9989711046218872	1	0.9989711046218872
+152	en_0153	wash	cucumber	-	Hey store clerk, can I please have some soap? Nah, I need to wash these cucumbers first!	0.034294623881578445	0.9657053351402283	1	0.9657053351402283
+153	en_0154	shake	table	-	Why did the table shake? Because someone was shaking their glass really bad!	0.002192096784710884	0.9978079199790955	1	0.9978079199790955
+154	en_0155	wash	watermelon	-	Why did the watermelon need to take a bath? To wash its ripeness!	0.002638653153553605	0.9973613619804382	1	0.9973613619804382
+155	en_0156	spray	book	-	Why did the book decide to go for a spray after shopping? Because it wanted its own aroma!	0.0035102672409266233	0.9964897036552429	1	0.9964897036552429
+156	en_0157	wash	microwave	-	Microwave: Don't forget to wash your hands! I nearly microwaved water from the sink just now.	0.022145535796880722	0.9778544902801514	1	0.9778544902801514
+157	en_0158	open	fridge	-	Waiter: Open the fridge! I need an ice pack, my brain's melting.	0.012603865005075932	0.9873961806297302	1	0.9873961806297302
+158	en_0159	move	microwave	-	Why did the microwave move across the room? Because it heard me plan to open another cookie!	0.0014473901828750968	0.9985526204109192	1	0.9985526204109192
+159	en_0160	measure	shoes	-	Why don't shoes like to go barefoot in stores? Because they don't want their measures to be shoe-less!	0.06544861197471619	0.9345513582229614	1	0.9345513582229614
+160	en_0161	cut	car	-	Why did the car have to go cut? Because it was doing a sharp turn! Cut car.	0.002812460297718644	0.9971875548362732	1	0.9971875548362732
+161	en_0162	wash	window	-	I thought I'd just wash this window with some window wash, but then I realized I'm already washing myself with all this elbow grease!	0.017762478440999985	0.9822375178337097	1	0.9822375178337097
+162	en_0163	wash	tomato	-	Why did the tomato wash up at the grocery store? Because it saw the others being sold!	0.0011435240739956498	0.9988564252853394	1	0.9988564252853394
+163	en_0164	throw	flower	-	Throw a flower and call it a rain!	0.956842303276062	0.04315769672393799	0	0.956842303276062
+164	en_0165	wash	rock	-	Why did the rock refuse to wash the car? It said it preferred to roll!	0.0013284498127177358	0.9986715316772461	1	0.9986715316772461
+165	en_0166	peel	corn	-	Why did the man peel the corn? To get to the kernel underneath!	0.0023932824842631817	0.9976067543029785	1	0.9976067543029785
+166	en_0167	weigh	book	-	Why did the book weigh more than it should? Because it was weighed wrong!	0.006618627347052097	0.9933813810348511	1	0.9933813810348511
+167	en_0168	spray	microwave	-	Why did the microwave refuse to spray my popcorn? Because it heard a microwave sprayer get fired!	0.0011569863418117166	0.9988429546356201	1	0.9988429546356201
+168	en_0169	roll	carrot	-	Why did the carrot go to the beach? To roll in the sand and pretend it was peeled!	0.0016461225459352136	0.9983539581298828	1	0.9983539581298828
+169	en_0170	cut	keyboard	-	Tech guy: Can't type fast? Cut! Keyboard's your friend!	0.04588339105248451	0.9541166424751282	1	0.9541166424751282
+170	en_0171	weigh	egg	-	"Why did the man think he weighed a ton of eggs? Because he thought in terms of ""weigh an egg"" instead of kilograms!"	0.0011722976341843605	0.9988277554512024	1	0.9988277554512024
+171	en_0172	wash	fridge	-	Why did they wash the fridge? To be honest, I just wanted to clean the dishes!	0.032004356384277344	0.9679957032203674	1	0.9679957032203674
+172	en_0173	unplug	blender	-	Blender unplugged? My phone just got a new best friend. Unplug, it won't notice, but your appliances might be surprised!	0.07532062381505966	0.9246793389320374	1	0.9246793389320374
+173	en_0174	weigh	banana	-	Why did the banana cross the supermarket aisle? To weigh on the other side!	0.0013109297724440694	0.9986891150474548	1	0.9986891150474548
+174	en_0175	wash	door	-	Why did the door go to the wash? To get all door-rounded!	0.0023761913180351257	0.997623860836029	1	0.997623860836029
+175	en_0176	measure	flower	-	Why did the florist measure the flower? Because it was trying to tell him its true size – but in inches!	0.0012982460903003812	0.9987016916275024	1	0.9987016916275024
+176	en_0177	weigh	bottle	-	I asked the cashier how much a bottle weighs, she said about six quarters.	0.024662354961037636	0.9753376245498657	1	0.9753376245498657
+177	en_0178	cut	phone	-	Why don't we ever cut phones with scissors anymore? Because it's just easier to fry them with electricity!	0.001431974582374096	0.9985679388046265	1	0.9985679388046265
+178	en_0179	wash	apple	-	Apple wash? Yeah, you gotta wash that apple, then pretend you're washing your hands!	0.1046869233250618	0.8953130841255188	1	0.8953130841255188
+179	en_0180	cut	pumpkin	-	Cut a pumpkin, you get a pie - no, that's not funny folks, it's a jack-o'-lantern!	0.027122551575303078	0.9728775024414062	1	0.9728775024414062
+180	en_0181	wash	towel	-	Washing? You should give that towel a wash first, it’s still smelling like someone else’s laundry.	0.06349033117294312	0.9365096092224121	1	0.9365096092224121
+181	en_0182	hammer	keyboard	-	Why did the keyboard say no to the hammer? It was already taken!	0.002766793128103018	0.9972332119941711	1	0.9972332119941711
+182	en_0183	spray	table	-	At the table, I mistook spray for pour - ended up with water on my shirt!	0.2130153775215149	0.7869845628738403	1	0.7869845628738403
+183	en_0184	cut	rock	-	Why did the rock say sorry to the hammer? It got cut too many times trying to be a chisel.	0.0011439911322668195	0.9988560676574707	1	0.9988560676574707
+184	en_0185	cut	book	-	Cut my latest book into pieces? Because I cut out all the boring bits!	0.008455727249383926	0.991544246673584	1	0.991544246673584
+185	en_0186	shake	hair	-	Why did the person shake their hair so hard before combing? To loosen up the knots, obviously!	0.010988393798470497	0.9890116453170776	1	0.9890116453170776
+186	en_0187	shake	lemon	-	Bartender: Hold the lemon! Shake it up! Lemon, lemon, lemon!	0.3398948013782501	0.6601052284240723	1	0.6601052284240723
+187	en_0188	measure	carrots	-	Manager: And don't forget to measure your carrots with a ruler! Everyone loves perfectly sized veggies.	0.07890279591083527	0.9210971593856812	1	0.9210971593856812
+188	en_0189	hammer	bottle	-	Guy tries to drink from a bottle. He's holding a hammer! Oops, tapped the bottle instead.	0.012744407169520855	0.9872555732727051	1	0.9872555732727051
+189	en_0190	wash	blender	-	Why did the blender break up with the dish washer? Because it heard she washes more than once a day!	0.0011679433519020677	0.9988320469856262	1	0.9988320469856262
+190	en_0191	close	fridge	-	In my fridge, the eggplant was close to being picked... but then it got cold!	0.015800947323441505	0.984199047088623	1	0.984199047088623
+191	en_0192	wash	oven	-	Someone spilled water in the oven, now I have to wash my hands and the whole damn oven!	0.012953921221196651	0.9870461225509644	1	0.9870461225509644
+192	en_0193	hammer	coconut	-	Man: I'm gonna hammer this roof for ventilation! Oh, wait, you mean a coconut?	0.002969637280330062	0.9970303773880005	1	0.9970303773880005
+193	en_0194	measure	laptop	-	Why did the laptop go to the doctor? To have its measure on the screen.	0.001399731612764299	0.9986003041267395	1	0.9986003041267395
+194	en_0195	shake	tomato	-	Bartender: Can I shake that tomato for you?	0.10994438827037811	0.8900556564331055	1	0.8900556564331055
+195	en_0196	wash	chair	-	Why did the chair go to the doctor? To wash its coffee stains! (wait for applause) No way! It's a chair! A CHAIR!? Wash its CHAIR?!	0.002204611897468567	0.9977954626083374	1	0.9977954626083374
+196	en_0197	hammer	watermelon	-	Guy: What’s worse than cutting a watermelon with a hammer? Using a knife, then taking a bath!	0.0012823725119233131	0.9987176656723022	1	0.9987176656723022
+197	en_0198	spray	eggs	-	Chef: I'm gonna show you how to crack eggs properly... Spray! Eggs everywhere, everyone's face covered! How did that happen? I was just spraying the eggs!	0.002999756019562483	0.9970002770423889	1	0.9970002770423889
+198	en_0199	shake	flower	-	Shake, shake, don't even think about it! I'm just here for the flower, okay?	0.8900514841079712	0.1099485382437706	0	0.8900514841079712
+199	en_0200	move	tree	-	Why did the tree decide to move? Because it heard moving is green!	0.003873206675052643	0.9961268305778503	1	0.9961268305778503
+
+
+# summary
+# predicted_not_joke_count	4
+# predicted_joke_count	96
+# avg_not_joke_certainty	0.06185737902065739
+# avg_joke_certainty	0.9381426236778497
+
+predicted_label	label_name	count	avg_certainty
+0	not_joke	4	0.06185737902065739
+1	joke	96	0.9381426236778497

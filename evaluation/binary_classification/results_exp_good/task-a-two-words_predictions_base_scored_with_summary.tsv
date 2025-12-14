@@ -1,0 +1,112 @@
+Unnamed: 0	id	word1	word2	headline	prediction	p_not_joke	p_joke	model_pred	certainty
+100	en_0101	spray	chair	-	Why did the chair spray water? Because it was a soggy seat!	0.002551579847931862	0.9974484443664551	1	0.9974484443664551
+101	en_0102	hammer	banana	-	Why did the hammer decide to eat a banana? Because it was feeling a little head-heavy!	0.000987257924862206	0.9990127086639404	1	0.9990127086639404
+102	en_0103	move	fridge	-	Why did the fridge move to the south pole? Because you can’t deal with cold friends!	0.0014772550202906132	0.9985228180885315	1	0.9985228180885315
+103	en_0104	hammer	pumpkin	-	Why did the hammer decide to join a Halloween parade? Because it saw the pumpkin!	0.0011515921214595437	0.9988484382629395	1	0.9988484382629395
+104	en_0105	peel	pumpkin	-	Why did the pumpkin call his lawyer? To peel this off!	0.0012372578494250774	0.9987627267837524	1	0.9987627267837524
+105	en_0106	microwave	book	-	Why did the microwave go to the book? To borrow some heat!	0.0014492133632302284	0.9985507130622864	1	0.9985507130622864
+106	en_0107	spray	door	-	Why did the door go to the doctor? It had a bad spray!	0.0018615243025124073	0.998138427734375	1	0.998138427734375
+107	en_0108	measure	pizza	-	Why did the pizza measure its crust? To make sure it was just right!	0.002042189473286271	0.9979578256607056	1	0.9979578256607056
+108	en_0109	unplug	fridge	-	Why did the fridge unplug itself? It heard too many melting ice cream jokes.	0.0012628284748643637	0.9987371563911438	1	0.9987371563911438
+109	en_0110	weigh	phone	-	Why did the heavy phone cross the road? To balance out the weigh side!	0.0018664303934201598	0.9981335997581482	1	0.9981335997581482
+110	en_0111	deseed	tomato	-	Why did the tomato turn red? Because it saw its own deseed!	0.0014685671776533127	0.9985314607620239	1	0.9985314607620239
+111	en_0112	spray	cup	-	Why did the cup go to the doctor? It had a leaking spray!	0.002357104793190956	0.9976428151130676	1	0.9976428151130676
+112	en_0113	close	blender	-	Why did the tomato turn red? Because it saw the close-up of a blender!	0.0011410032166168094	0.9988590478897095	1	0.9988590478897095
+113	en_0114	hammer	tomato	-	Why did the tomato turn purple? Because it saw the hammer!	0.00125612982083112	0.9987439513206482	1	0.9987439513206482
+114	en_0115	blend	pumpkin	-	Why did the pumpkin join a blender? To blend in with the vegetables!	0.0032105257268995047	0.9967893958091736	1	0.9967893958091736
+115	en_0116	microwave	laptop	-	Why did the microwave put down its laptop? Because it felt a bit fried!	0.0011776182800531387	0.9988223910331726	1	0.9988223910331726
+116	en_0117	drill	eggs	-	I brought a drill to a eggs meeting; both were unqualified, but somehow still got promoted.	0.008289646357297897	0.991710364818573	1	0.991710364818573
+117	en_0118	peel	coconut	-	Why did the coconut decide to do a stand-up comedy routine? Because its act was really fruity and peel-y!	0.0010997593635693192	0.9989001750946045	1	0.9989001750946045
+118	en_0119	cut	shoes	-	I brought a cut to a shoes meeting; both were unqualified, but somehow still got promoted.	0.01313729677349329	0.9868626594543457	1	0.9868626594543457
+119	en_0120	weigh	watermelon	-	Why did the watermelon weigh itself at the scale? To find out how juicy it really was!	0.0054085697047412395	0.9945914149284363	1	0.9945914149284363
+120	en_0121	hammer	fridge	-	Why did the hammer decide to move into the fridge? Because it couldn't find a nail to put in!	0.001135149970650673	0.9988648891448975	1	0.9988648891448975
+121	en_0122	open	blender	-	Why did the pizza open its blender? To blend my excuses!	0.0016273941146209836	0.9983726143836975	1	0.9983726143836975
+122	en_0123	cut	coconut	-	Why did the coconut go to the理发 salon? To get its cut!	0.0015814503422006965	0.9984185695648193	1	0.9984185695648193
+123	en_0124	measure	bacon	-	Why did the bacon measure everything in the kitchen? Because it likes to feel part of the meal!	0.0011199312284588814	0.9988800883293152	1	0.9988800883293152
+124	en_0125	drop	fridge	-	Why did the fridge drop dead? Because it felt left out all the time!	0.0015100648161023855	0.9984899759292603	1	0.9984899759292603
+125	en_0126	measure	pumpkin	-	Why did the pumpkin measure its weight in pounds? Because it's a big squash!	0.0012739343801513314	0.9987260699272156	1	0.9987260699272156
+126	en_0127	cut	laptop	-	Why did the laptop go to the barber? To get its cut!	0.0016490528360009193	0.998350977897644	1	0.998350977897644
+127	en_0128	wash	keyboard	-	Why did the keyboard go to the wash? To be typed clean!	0.002346192952245474	0.9976537823677063	1	0.9976537823677063
+128	en_0129	shake	tree	-	Why did the tree shake so violently? It heard there would be a branch meeting later!	0.00653046602383256	0.9934694766998291	1	0.9934694766998291
+129	en_0130	roll	potato	-	Why did the potato roll down the hill? Because it saw the french fry sign!	0.0013511735014617443	0.9986488223075867	1	0.9986488223075867
+130	en_0131	throw	phone	-	Why did the phone throw an anvil? To reach the caller higher up!	0.001570793567225337	0.9984291195869446	1	0.9984291195869446
+131	en_0132	throw	orange	-	Why did the orange throw a pie at the apple? Because apples aren't orange blind!	0.0012468576896935701	0.9987531900405884	1	0.9987531900405884
+132	en_0133	fry	phone	-	Why did the potato want to change its number on the phone? To fry up some new lines!	0.001054632244631648	0.998945415019989	1	0.998945415019989
+133	en_0134	hammer	microwave	-	Why did the hammer decide to go to the microwave? To get cold!	0.0013262686552479863	0.9986737966537476	1	0.9986737966537476
+134	en_0135	unplug	phone	-	Why did the phone decide to unplug itself? Because it heard too many voicemail messages!	0.0014599764253944159	0.9985400438308716	1	0.9985400438308716
+135	en_0136	weigh	pumpkin	-	Why did the pumpkin weigh himself? To find out how big he was!	0.021024489775300026	0.9789754748344421	1	0.9789754748344421
+136	en_0137	measure	microwave	-	Why did the microwave go to school? To learn how to measure its temperature!	0.0014176447875797749	0.9985823631286621	1	0.9985823631286621
+137	en_0138	weigh	tomato	-	Why did the tomato fall over? To weigh down all the salads!	0.0018547525396570563	0.9981452226638794	1	0.9981452226638794
+138	en_0139	measure	watermelon	-	Why did the watermelon go on a scale? To measure how juicy it really was!	0.0022062379866838455	0.9977937936782837	1	0.9977937936782837
+139	en_0140	throw	spoon	-	Why did the spoon decide to throw a party? Because it heard forks were having a salad!	0.0011343337828293443	0.9988657236099243	1	0.9988657236099243
+140	en_0141	microwave	shoes	-	Why did the microwave wear shoes? To protect its 'ray-soles'!	0.0013032660353928804	0.9986967444419861	1	0.9986967444419861
+141	en_0142	throw	shirt	-	Why did the shirt throw itself into the fire? Because it heard about gravity!	0.0018265575636178255	0.9981734752655029	1	0.9981734752655029
+142	en_0143	measure	oven	-	Why did the chef measure the oven before baking? To make sure it was just right, didn't want any burnt fingers!	0.0016428477829322219	0.9983571171760559	1	0.9983571171760559
+143	en_0144	drink	egg	-	Why did the egg go to the bar? To drink some coffee!	0.0011630823137238622	0.9988369345664978	1	0.9988369345664978
+144	en_0145	throw	cookie	-	Why did the cookie throw itself off a cliff? To break its crust!	0.0017125671729445457	0.9982873797416687	1	0.9982873797416687
+145	en_0146	blend	phone	-	Why did the phone blend with the laptop? To make dinner!	0.0019430887186899781	0.9980568289756775	1	0.9980568289756775
+146	en_0147	hammer	car	-	Why did the car go to therapy? It had a lot of scratches and went to the hammer.	0.0011820596409961581	0.9988178610801697	1	0.9988178610801697
+147	en_0148	drill	bottle	-	Why did the drill go broke? It drank too much from the plastic bottle!	0.0013134779874235392	0.9986864924430847	1	0.9986864924430847
+148	en_0149	cut	towel	-	Why did the towel go to the barber? To get its cut!	0.0016186214052140713	0.9983813762664795	1	0.9983813762664795
+149	en_0150	hammer	shoes	-	Why did the hammer need new shoes? To protect its toes from nailing accidents!	0.004176686983555555	0.9958232641220093	1	0.9958232641220093
+150	en_0151	hammer	egg	-	Why did the hammer decide to go on a date with the egg? Because it saw a nail!	0.0010373820550739765	0.9989626407623291	1	0.9989626407623291
+151	en_0152	hammer	phone	-	Why did the hammer call the phone? Because his voice resonated!	0.001306473626755178	0.9986935257911682	1	0.9986935257911682
+152	en_0153	wash	cucumber	-	Why did the cucumber wash its dishes? To cube-ate!	0.001266812440007925	0.9987332224845886	1	0.9987332224845886
+153	en_0154	shake	table	-	Why did the table shake at the dinner table? Because it saw my salad dressing shake!	0.0011870713206008077	0.9988129138946533	1	0.9988129138946533
+154	en_0155	wash	watermelon	-	Why did the watermelon go to the wash? To get all ripe inside!	0.0017124480800703168	0.9982874989509583	1	0.9982874989509583
+155	en_0156	spray	book	-	Why did the book go to the doctor? It had a bad ink spray!	0.0016939927591010928	0.9983060359954834	1	0.9983060359954834
+156	en_0157	wash	microwave	-	Why did the microwave wash itself? Because it heard washing dishes was unhealthy!	0.0014258279697969556	0.9985741376876831	1	0.9985741376876831
+157	en_0158	open	fridge	-	"Why did the fridge open up and say sorry? Because it heard someone say ""open this please!"""	0.0013907930115237832	0.998609185218811	1	0.998609185218811
+158	en_0159	move	microwave	-	Why did the microwave move to the beach? Because the kitchen cabinet was full of popcorn kernels!	0.0011687169317156076	0.9988313317298889	1	0.9988313317298889
+159	en_0160	measure	shoes	-	I brought a measure to a shoes meeting; both were unqualified, but somehow still got promoted.	0.015299241989850998	0.9847007989883423	1	0.9847007989883423
+160	en_0161	cut	car	-	Why did the car go to the doctor? It had a bad fender-cut!	0.001452051568776369	0.9985479712486267	1	0.9985479712486267
+161	en_0162	wash	window	-	I brought a wash to a window meeting; both were unqualified, but somehow still got promoted.	0.012127548456192017	0.9878724813461304	1	0.9878724813461304
+162	en_0163	wash	tomato	-	Why did the tomato wash its dishes? Because it didn't want any potato fries!	0.001244575367309153	0.9987554550170898	1	0.9987554550170898
+163	en_0164	throw	flower	-	Why did the flower decide to throw itself off a cliff? To get rid of all its problems!	0.004000736400485039	0.9959993362426758	1	0.9959993362426758
+164	en_0165	wash	rock	-	Why did the rock take a bath? To wash its groove out!	0.0019153247121721506	0.9980846643447876	1	0.9980846643447876
+165	en_0166	peel	corn	-	Why did the corn have to peel? Because it was painted yellow!	0.0014716554433107376	0.9985283613204956	1	0.9985283613204956
+166	en_0167	weigh	book	-	Why did the weigh book cross the road? To see the other zero!	0.0032806294038891792	0.9967194199562073	1	0.9967194199562073
+167	en_0168	spray	microwave	-	Why did the microwave spray tomato soup at the chef? Because he spilled his secrets!	0.0011407260317355394	0.9988592863082886	1	0.9988592863082886
+168	en_0169	roll	carrot	-	Why did the carrot go to the party? To roll with the veggies!	0.0014627360505983233	0.9985373020172119	1	0.9985373020172119
+169	en_0170	cut	keyboard	-	Why did the keyboard go to the cafeteria? To get its cut!	0.0014681658940389752	0.9985318183898926	1	0.9985318183898926
+170	en_0171	weigh	egg	-	Why did the egg weigh more on the scale? Because it had a yolk!	0.0013966397382318974	0.9986034035682678	1	0.9986034035682678
+171	en_0172	wash	fridge	-	Why did the fridge go to wash its socks? Because it heard washing dishes was good for the heart!	0.001441375119611621	0.9985585808753967	1	0.9985585808753967
+172	en_0173	unplug	blender	-	Why did the blender unplug during the power outage? Because it heard the soup was boiling mad!	0.0011850314913317561	0.9988149404525757	1	0.9988149404525757
+173	en_0174	weigh	banana	-	Why did the banana weigh more than the apple? Because the banana was so ripe, it expanded and gained mass!	0.002095090225338936	0.997904896736145	1	0.997904896736145
+174	en_0175	wash	door	-	Why did the wash want to be a door? Because it heard it was all wet inside!	0.0014374302700161934	0.9985626339912415	1	0.9985626339912415
+175	en_0176	measure	flower	-	Why did the flower go to school? To learn how to measure its petals perfectly!	0.0020274335984140635	0.9979725480079651	1	0.9979725480079651
+176	en_0177	weigh	bottle	-	Why did the weigh bottle decide to stay at home? It didn't feel weighed down!	0.0018740356899797916	0.9981259703636169	1	0.9981259703636169
+177	en_0178	cut	phone	-	Why did the phone cut the cord? Because it couldn't stand the cable talk anymore.	0.001606006408110261	0.9983939528465271	1	0.9983939528465271
+178	en_0179	wash	apple	-	Why did the apple wash itself? To clean its tree!	0.002663332037627697	0.9973366856575012	1	0.9973366856575012
+179	en_0180	cut	pumpkin	-	Why did the pumpkin cut its hand? It saw a knife carving its future!	0.001492589246481657	0.9985074400901794	1	0.9985074400901794
+180	en_0181	wash	towel	-	Why did the wash want a towel? Because the dryer was too fluff-less!	0.0018971340032294393	0.9981028437614441	1	0.9981028437614441
+181	en_0182	hammer	keyboard	-	Why did the hammer join a keyboard party? Because he's a key-banger!	0.0010128620779141784	0.9989871382713318	1	0.9989871382713318
+182	en_0183	spray	table	-	Why did the table go to the doctor? It had a paper cut from spray painting!	0.001343253767117858	0.9986567497253418	1	0.9986567497253418
+183	en_0184	cut	rock	-	Why did the rock go to the cafeteria? To get its cut!	0.0016554300673305988	0.9983445405960083	1	0.9983445405960083
+184	en_0185	cut	book	-	Why did the book go to the doctor? It had a bad cut!	0.001840717624872923	0.9981592297554016	1	0.9981592297554016
+185	en_0186	shake	hair	-	Why did the hair shake off? Because it heard about my new hairstyle!	0.005292186979204416	0.9947078227996826	1	0.9947078227996826
+186	en_0187	shake	lemon	-	Why did the lemon shake so much at the beach? Because it saw too many sandwitches!	0.0011220804881304502	0.9988779425621033	1	0.9988779425621033
+187	en_0188	measure	carrots	-	I brought a measure to a carrots meeting; both were unqualified, but somehow still got promoted.	0.01936509646475315	0.9806349277496338	1	0.9806349277496338
+188	en_0189	hammer	bottle	-	Why did the hammer decide to live in a bottle? Because it didn't like being a stick!	0.0011566552566364408	0.9988433122634888	1	0.9988433122634888
+189	en_0190	wash	blender	-	Why did the washer decide to get a job at a blender factory? To wash dishes!	0.0012592730345204473	0.9987407326698303	1	0.9987407326698303
+190	en_0191	close	fridge	-	Why did the fridge close its door? To keep the steak inside.	0.0015383638674393296	0.9984616041183472	1	0.9984616041183472
+191	en_0192	wash	oven	-	Why did the cookie have to wash its car in the oven? Because soap wasn't an option!	0.0014289055252447724	0.9985710382461548	1	0.9985710382461548
+192	en_0193	hammer	coconut	-	Why did the hammer decide to live in a coconut? Because it heard it was a tough nut to crack!	0.0010756626725196838	0.9989243149757385	1	0.9989243149757385
+193	en_0194	measure	laptop	-	Why did the laptop go to the doctor? It had a measure of too much screen time.	0.0011611260706558824	0.9988388419151306	1	0.9988388419151306
+194	en_0195	shake	tomato	-	Why did the tomato shake its shaker? Because it saw salt!	0.0013263949658721685	0.998673677444458	1	0.998673677444458
+195	en_0196	wash	chair	-	Why did the wash decide to sit on a chair? Because it heard towels were too stiff!	0.0012866159668192267	0.9987133741378784	1	0.9987133741378784
+196	en_0197	hammer	watermelon	-	Why did the hammer join a band? To get all loose like a watermelon!	0.0012406070018187165	0.998759388923645	1	0.998759388923645
+197	en_0198	spray	eggs	-	I brought a spray to a eggs meeting; both were unqualified, but somehow still got promoted.	0.011768599040806293	0.988231360912323	1	0.988231360912323
+198	en_0199	shake	flower	-	Why did the flower shake hands with the tree? Because it wanted to leaf it alone!	0.002871133852750063	0.9971289038658142	1	0.9971289038658142
+199	en_0200	move	tree	-	Why did the tree decide to move? Because it heard the saw was sharp!	0.002993617206811905	0.997006356716156	1	0.997006356716156
+
+
+# summary
+# predicted_not_joke_count	0
+# predicted_joke_count	100
+# avg_not_joke_certainty	nan
+# avg_joke_certainty	0.997363559603691
+
+predicted_label	label_name	count	avg_certainty
+0	not_joke	0	
+1	joke	100	0.997363559603691
