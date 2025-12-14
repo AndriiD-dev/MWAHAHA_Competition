@@ -39,7 +39,13 @@ class InferenceConfig:
     output_dir: Path = OUTPUT_DIR
     output_filename: str = "task-a-two-words_predictions_base.tsv"
 
-    # Decoding
+    # Plan decoding (pass 1)
+    plan_max_new_tokens: int = 72
+    plan_min_new_tokens: int = 16
+    plan_temperature: float = 0.4
+    plan_top_p: float = 0.9
+
+    # Final decoding (pass 2)
     max_new_tokens: int = 32
     min_new_tokens: int = 6
     temperature: float = 0.8
@@ -49,7 +55,7 @@ class InferenceConfig:
     # Throughput
     batch_size: int = 16
 
-    # “Zero empty cells” + “must include both words”
+    # “Zero empty cells” + “must include both words” (applies to final jokes)
     max_retries: int = 2
     retry_settings: Tuple[Tuple[float, float, int], ...] = (
         (0.95, 0.98, 40),
@@ -132,7 +138,7 @@ def load_model_and_tokenizer():
 
 
 # ---------------------------------------------------------------------------
-# Validation helpers
+# Validation + fallbacks
 # ---------------------------------------------------------------------------
 
 def _boundary_pattern(phrase: str) -> re.Pattern:
@@ -143,10 +149,12 @@ def _boundary_pattern(phrase: str) -> re.Pattern:
     p = re.escape(pb.safe_word(phrase))
     return re.compile(rf"(?<![A-Za-z0-9]){p}(?![A-Za-z0-9])")
 
+
 def required_words_present(text: str, word1: str, word2: str) -> bool:
     t = pb.normalize_one_line(text)
     if not t:
         return False
+
     w1 = pb.safe_word(word1)
     w2 = pb.safe_word(word2)
     if not w1 or not w2:
@@ -157,8 +165,14 @@ def required_words_present(text: str, word1: str, word2: str) -> bool:
     return p1 and p2
 
 
+def fallback_plan(word1: str, word2: str) -> str:
+    # A minimal plan if the plan generation comes back empty.
+    return pb.normalize_one_line(
+        '{"scenario":"everyday misunderstanding","misdirection":"take it literally","word_placement":"use both words in the punchline","device":"reversal"}'
+    )
+
+
 def fallback_joke(word1: str, word2: str) -> str:
-    # Guaranteed inclusion, one line, short.
     w1 = pb.safe_word(word1)
     w2 = pb.safe_word(word2)
     return pb.normalize_one_line(
@@ -170,14 +184,18 @@ def fallback_joke(word1: str, word2: str) -> str:
 # Prompt building (delegated to prompt_builder.py)
 # ---------------------------------------------------------------------------
 
-def build_chat_text(tokenizer, word1: str, word2: str, strict_suffix: str = "") -> str:
-    """
-    Uses prompt_builder.build_joke_messages() and converts to a model-ready chat template string.
-    strict_suffix optionally appends extra instruction for retries.
-    """
-    messages = pb.build_joke_messages(word1, word2)
+def build_plan_chat_text(tokenizer, word1: str, word2: str) -> str:
+    messages = pb.build_plan_messages(word1, word2)
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+
+def build_final_chat_text(tokenizer, word1: str, word2: str, plan_text: str, strict_suffix: str = "") -> str:
+    messages = pb.build_final_messages(word1, word2, plan_text)
     if strict_suffix:
-        # Append extra constraint to the user message without re-implementing the builder logic.
         messages = [dict(messages[0]), dict(messages[1])]
         messages[1]["content"] = pb.normalize_one_line(messages[1]["content"] + "\n" + strict_suffix)
 
@@ -189,12 +207,12 @@ def build_chat_text(tokenizer, word1: str, word2: str, strict_suffix: str = "") 
 
 
 # ---------------------------------------------------------------------------
-# Batching
+# Batching helpers
 # ---------------------------------------------------------------------------
 
 def batched(items: List[int], batch_size: int) -> Iterable[List[int]]:
     for i in range(0, len(items), batch_size):
-        yield items[i : i + batch_size]
+        yield items[i: i + batch_size]
 
 
 def order_by_length(texts: List[str]) -> List[int]:
@@ -202,7 +220,7 @@ def order_by_length(texts: List[str]) -> List[int]:
 
 
 # ---------------------------------------------------------------------------
-# Generation
+# Generation core
 # ---------------------------------------------------------------------------
 
 @torch.inference_mode()
@@ -254,8 +272,47 @@ def generate_batch_once(
     return [pb.normalize_one_line(x) for x in decoded]
 
 
+def generate_all(
+    model,
+    tokenizer,
+    chat_texts: List[str],
+    batch_size: int,
+    temperature: float,
+    top_p: float,
+    max_new_tokens: int,
+    min_new_tokens: int,
+    label: str,
+) -> List[str]:
+    n = len(chat_texts)
+    outputs: List[str] = [""] * n
+    order = order_by_length(chat_texts)
+
+    for batch_index, batch_ids in enumerate(batched(order, batch_size), start=1):
+        batch_texts = [chat_texts[i] for i in batch_ids]
+        print(f"\n[{label} batch {batch_index}] size={len(batch_ids)}")
+
+        batch_out = generate_batch_once(
+            model=model,
+            tokenizer=tokenizer,
+            chat_texts=batch_texts,
+            temperature=temperature,
+            top_p=top_p,
+            max_new_tokens=max_new_tokens,
+            min_new_tokens=min_new_tokens,
+        )
+
+        for j, out_text in enumerate(batch_out):
+            outputs[batch_ids[j]] = out_text
+
+    return outputs
+
+
+# ---------------------------------------------------------------------------
+# Two-pass (Option 2A): plan for all -> final for all
+# ---------------------------------------------------------------------------
+
 @torch.inference_mode()
-def generate_word_inclusion_predictions(
+def generate_word_inclusion_predictions_with_plans(
     model,
     tokenizer,
     word1_list: List[str],
@@ -263,33 +320,36 @@ def generate_word_inclusion_predictions(
     batch_size: int,
 ) -> List[str]:
     n = len(word1_list)
-
-    # Build initial chat texts (includes micro-cards/facts from prompt_builder)
-    chat_texts = [
-        build_chat_text(tokenizer, word1_list[i], word2_list[i])
-        for i in range(n)
-    ]
-
-    outputs: List[str] = [""] * n
-    order = order_by_length(chat_texts)
     start_all = time.time()
 
-    for batch_index, batch_ids in enumerate(batched(order, batch_size), start=1):
-        batch_texts = [chat_texts[i] for i in batch_ids]
-        print(f"\n[Batch {batch_index}] size={len(batch_ids)}")
+    # Pass 1: plans
+    plan_texts = [build_plan_chat_text(tokenizer, word1_list[i], word2_list[i]) for i in range(n)]
+    plans = generate_all(
+        model=model,
+        tokenizer=tokenizer,
+        chat_texts=plan_texts,
+        batch_size=batch_size,
+        temperature=cfg.plan_temperature,
+        top_p=cfg.plan_top_p,
+        max_new_tokens=cfg.plan_max_new_tokens,
+        min_new_tokens=cfg.plan_min_new_tokens,
+        label="PLAN",
+    )
+    plans = [p if pb.normalize_one_line(p) else fallback_plan(word1_list[i], word2_list[i]) for i, p in enumerate(plans)]
 
-        batch_out = generate_batch_once(
-            model=model,
-            tokenizer=tokenizer,
-            chat_texts=batch_texts,
-            temperature=cfg.temperature,
-            top_p=cfg.top_p,
-            max_new_tokens=cfg.max_new_tokens,
-            min_new_tokens=cfg.min_new_tokens,
-        )
-
-        for j, out_text in enumerate(batch_out):
-            outputs[batch_ids[j]] = out_text
+    # Pass 2: finals
+    final_texts = [build_final_chat_text(tokenizer, word1_list[i], word2_list[i], plans[i]) for i in range(n)]
+    outputs = generate_all(
+        model=model,
+        tokenizer=tokenizer,
+        chat_texts=final_texts,
+        batch_size=batch_size,
+        temperature=cfg.temperature,
+        top_p=cfg.top_p,
+        max_new_tokens=cfg.max_new_tokens,
+        min_new_tokens=cfg.min_new_tokens,
+        label="FINAL",
+    )
 
     def is_good(i: int) -> bool:
         t = outputs[i]
@@ -298,54 +358,48 @@ def generate_word_inclusion_predictions(
         return required_words_present(t, word1_list[i], word2_list[i])
 
     bad_indices = [i for i in range(n) if not is_good(i)]
-    print(f"\nInitial failures (empty or missing required words): {len(bad_indices)}")
+    print(f"\nInitial final failures (empty or missing required words): {len(bad_indices)}")
 
-    strict_suffix = "IMPORTANT: The joke is INVALID unless it includes BOTH required words exactly as written."
+    strict_suffix = (
+        "IMPORTANT: The joke is INVALID unless it includes BOTH required words exactly as written. "
+        "Output only the joke."
+    )
 
+    # Retry only the FINAL step (keep the plan fixed)
     for retry_round, (temp, tp, mx) in enumerate(cfg.retry_settings[: cfg.max_retries], start=1):
         if not bad_indices:
             break
 
-        print(f"\nRetry round {retry_round}: temperature={temp}, top_p={tp}, max_new_tokens={mx}")
+        print(f"\nFINAL retry round {retry_round}: temperature={temp}, top_p={tp}, max_new_tokens={mx}")
 
         retry_texts = [
-            build_chat_text(tokenizer, word1_list[i], word2_list[i], strict_suffix=strict_suffix)
+            build_final_chat_text(tokenizer, word1_list[i], word2_list[i], plans[i], strict_suffix=strict_suffix)
             for i in bad_indices
         ]
-        retry_order = order_by_length(retry_texts)
-
-        retry_out_all: List[str] = []
-        for chunk_ids in batched(retry_order, batch_size):
-            chunk_texts = [retry_texts[k] for k in chunk_ids]
-            retry_out_all.extend(
-                generate_batch_once(
-                    model=model,
-                    tokenizer=tokenizer,
-                    chat_texts=chunk_texts,
-                    temperature=temp,
-                    top_p=tp,
-                    max_new_tokens=mx,
-                    min_new_tokens=max(cfg.min_new_tokens, 8),
-                )
-            )
-
-        # Map retry outputs back to bad_indices
-        retry_out = [""] * len(retry_texts)
-        for pos, k in enumerate(retry_order):
-            retry_out[k] = retry_out_all[pos]
+        retry_out = generate_all(
+            model=model,
+            tokenizer=tokenizer,
+            chat_texts=retry_texts,
+            batch_size=batch_size,
+            temperature=temp,
+            top_p=tp,
+            max_new_tokens=mx,
+            min_new_tokens=max(cfg.min_new_tokens, 8),
+            label=f"FINAL RETRY {retry_round}",
+        )
 
         new_bad: List[int] = []
-        for idx_pos, original_i in enumerate(bad_indices):
-            candidate = pb.normalize_one_line(retry_out[idx_pos])
-            if candidate and required_words_present(candidate, word1_list[original_i], word2_list[original_i]):
-                outputs[original_i] = candidate
+        for pos, i in enumerate(bad_indices):
+            candidate = pb.normalize_one_line(retry_out[pos])
+            if candidate and required_words_present(candidate, word1_list[i], word2_list[i]):
+                outputs[i] = candidate
             else:
-                new_bad.append(original_i)
+                new_bad.append(i)
 
         bad_indices = new_bad
-        print(f"Failures after retry round {retry_round}: {len(bad_indices)}")
+        print(f"Final failures after retry round {retry_round}: {len(bad_indices)}")
 
-    # Final guarantee: valid and non-empty
+    # Final guarantee
     if bad_indices:
         print(f"\nApplying fallback for remaining failures: {len(bad_indices)}")
         for i in bad_indices:
@@ -430,7 +484,7 @@ def main():
 
     model, tokenizer = load_model_and_tokenizer()
 
-    predictions = generate_word_inclusion_predictions(
+    predictions = generate_word_inclusion_predictions_with_plans(
         model=model,
         tokenizer=tokenizer,
         word1_list=word1_list,
