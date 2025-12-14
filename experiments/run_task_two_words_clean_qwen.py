@@ -11,7 +11,7 @@ import torch
 import pandas as pd
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-import prompt_builder as pb
+import prompt_builder_two_words as pb
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ def fallback_joke(word1: str, word2: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Prompt building (delegated to prompt_builder.py)
+# Prompt building (delegated to prompt_builder_two_words.py)
 # ---------------------------------------------------------------------------
 
 def build_plan_chat_text(tokenizer, word1: str, word2: str) -> str:

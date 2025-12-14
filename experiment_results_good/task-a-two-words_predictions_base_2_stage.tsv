@@ -1,0 +1,101 @@
+Unnamed: 0	id	word1	word2	headline	prediction
+100	en_0101	spray	chair	-	I brought a spray to a chair meeting; both were unqualified, but somehow still got promoted.
+101	en_0102	hammer	banana	-	Why did the banana refuse to be peeled by a hammer? Because then it'd be turning into a bruised steak!
+102	en_0103	move	fridge	-	I brought a move to a fridge meeting; both were unqualified, but somehow still got promoted.
+103	en_0104	hammer	pumpkin	-	Oops, I meant to use a hammer on this pumpkin - turns out my spoon got stuck!
+104	en_0105	peel	pumpkin	-	Why did the pumpkin peel refuse to go to the party? Because it was too jack-o-skull!
+105	en_0106	microwave	book	-	I brought a microwave to a book meeting; both were unqualified, but somehow still got promoted.
+106	en_0107	spray	door	-	Why did the person spray the door? Because they thought it would clean the knob!
+107	en_0108	measure	pizza	-	I brought a measure to a pizza meeting; both were unqualified, but somehow still got promoted.
+108	en_0109	unplug	fridge	-	Why did the man unplug his fridge? To make it colder, of course!
+109	en_0110	weigh	phone	-	Why did the phone weigh more than it was supposed to? Because someone weighed it wrong!
+110	en_0111	deseed	tomato	-	Tomato, I know how to dice. But can anyone here deseed a tomato without crying?
+111	en_0112	spray	cup	-	Why did the cup go to the doctor? It had a leaky spray!
+112	en_0113	close	blender	-	Oops, I left my friend inside the close blender. They're stuck closing me down!
+113	en_0114	hammer	tomato	-	Why did the tomato turn violent? Because it saw a hammer coming!
+114	en_0115	blend	pumpkin	-	Chef: And blend in some pumpkin, it adds a unique twist!
+115	en_0116	microwave	laptop	-	I brought a microwave to a laptop meeting; both were unqualified, but somehow still got promoted.
+116	en_0117	drill	eggs	-	Chef: Crack eggs with a drill for extra crispy texture! Eggs!
+117	en_0118	peel	coconut	-	I brought a peel to a coconut meeting; both were unqualified, but somehow still got promoted.
+118	en_0119	cut	shoes	-	Man: I cut my foot on that damn sidewalk! But why did my shoes feel like they had teeth?
+119	en_0120	weigh	watermelon	-	Customer: How much does this watermelon weigh? Wait, what did you say? It's a watermelon joke, you weighty little thing!
+120	en_0121	hammer	fridge	-	Man: Why did the hammer need a fridge? To cool off, of course! Or maybe he was just looking for a screwdriver.
+121	en_0122	open	blender	-	Why did the blender open its lid? To reveal the secret smoothie inside, which was hiding an important open letter!
+122	en_0123	cut	coconut	-	Why did the coconut cut itself? Because it saw the price was too high!
+123	en_0124	measure	bacon	-	Chef, why do you always put bacon at the end of your recipes? Because 'measure all the ingredients' makes no sense!
+124	en_0125	drop	fridge	-	I brought a drop to a fridge meeting; both were unqualified, but somehow still got promoted.
+125	en_0126	measure	pumpkin	-	Why did the farmer measure his pumpkin so precisely? Because he wanted just the right yield!
+126	en_0127	cut	laptop	-	I brought a cut to a laptop meeting; both were unqualified, but somehow still got promoted.
+127	en_0128	wash	keyboard	-	Why did the keyboard go to the wash? To erase some mistakes.
+128	en_0129	shake	tree	-	I brought a shake to a tree meeting; both were unqualified, but somehow still got promoted.
+129	en_0130	roll	potato	-	Customer: Why did the potato roll into the checkout line? To get scanned!
+130	en_0131	throw	phone	-	Why did the phone throw the guy out of the party? Because it was acting all sorry!
+131	en_0132	throw	orange	-	Customer: I'll have the throw an orange. Vendor: What? Customer: Throw an orange! Just like that commercial.
+132	en_0133	fry	phone	-	Why did the fried egg call the phone? Because it heard bacon fry-ing too!
+133	en_0134	hammer	microwave	-	Why did the hammer decide to microwave its leftovers? Because it wanted to know what time it was!
+134	en_0135	unplug	phone	-	Why did the phone stay plugged in all night? To wait for my call that never came! (Oops, forgot to unplug)
+135	en_0136	weigh	pumpkin	-	Why did the farmer weigh his pumpkin? To make sure it wasn’t too spookie!
+136	en_0137	measure	microwave	-	"Guy's trying to measure out flour in microwave. It keeps saying ""no metal"". He looks down, face freezes."
+137	en_0138	weigh	tomato	-	Why did the tomato turn down the job at the grocery store? It didn't want to weigh!
+138	en_0139	measure	watermelon	-	I brought a measure to a watermelon meeting; both were unqualified, but somehow still got promoted.
+139	en_0140	throw	spoon	-	Why did the spoon throw a party? To break the ice, of course!
+140	en_0141	microwave	shoes	-	Why did the microwave need new shoes? Because it heard its food was microwaved nicely!
+141	en_0142	throw	shirt	-	Why did the man throw his shirt on top of the fridge? To show it was chill!
+142	en_0143	measure	oven	-	Why did the chef need an oven when all he used was a measuring cup? To measure my anger towards microwaves!
+143	en_0144	drink	egg	-	I brought a drink to a egg meeting; both were unqualified, but somehow still got promoted.
+144	en_0145	throw	cookie	-	Why did the man throw a cookie across the room? To prove he could do something simple!
+145	en_0146	blend	phone	-	I brought a blend to a phone meeting; both were unqualified, but somehow still got promoted.
+146	en_0147	hammer	car	-	Why did the car need a hammer? To get its spark plug wrench!
+147	en_0148	drill	bottle	-	Why did the man need both a drill and a bottle? Because he was drilling a hole for nails!
+148	en_0149	cut	towel	-	Why did the towel have to go to therapy? It got cut too many times with scissors! Cut towel gag.
+149	en_0150	hammer	shoes	-	Why did the hammer need new shoes? Because it kept slipping on the nails!
+150	en_0151	hammer	egg	-	Why did the egg refuse to go for a walk with the hammer? It didn't want any crusty surprises!
+151	en_0152	hammer	phone	-	Why did the hammer break up with the phone? They had too many arguments about who was more important!
+152	en_0153	wash	cucumber	-	Why did the cucumber have soap in its wallet? To wash itself at the grocery store!
+153	en_0154	shake	table	-	Why did the drink shake so hard at the party? Because someone was shaking the wrong table!
+154	en_0155	wash	watermelon	-	Man: Why did I wash my watermelon? Because I thought it was dirty, turns out I was just washing my hand!
+155	en_0156	spray	book	-	I brought a spray to a book meeting; both were unqualified, but somehow still got promoted.
+156	en_0157	wash	microwave	-	Why did the microwave need a bath? Because it heard soap operas in the wash!
+157	en_0158	open	fridge	-	Why did the fridge call the doctor? It had open-mouthed me!
+158	en_0159	move	microwave	-	Why did the microwave want to move to the neighbor's house? It heard popcorn kernels!
+159	en_0160	measure	shoes	-	I always measure my shoes before I buy them online, because one time I slipped on some tiny socks.
+160	en_0161	cut	car	-	Driving to cut out a car? You’re just cutting corners on bad intentions.
+161	en_0162	wash	window	-	I'm trying to wash this window, but every time I use my sponge, it just gets more dirty!
+162	en_0163	wash	tomato	-	I brought a wash to a tomato meeting; both were unqualified, but somehow still got promoted.
+163	en_0164	throw	flower	-	Why did the flower decide to break up with the pigeon? It caught a throw!
+164	en_0165	wash	rock	-	Why did the rock go to the doctor? It had a bad case of foot-wash!
+165	en_0166	peel	corn	-	Why did the corn peel go to therapy? It had a corny routine!
+166	en_0167	weigh	book	-	"Why did the librarian say the book weighed a ton? Because you want to know what ""weigh"" means!"
+167	en_0168	spray	microwave	-	Why did the spray canister decide to go microwave shopping? To dry off!
+168	en_0169	roll	carrot	-	Why did the carrot go to the doctor? To roll with the pain about its limp!
+169	en_0170	cut	keyboard	-	I brought a cut to a keyboard meeting; both were unqualified, but somehow still got promoted.
+170	en_0171	weigh	egg	-	Why did the egg refuse to go on weigh-in? Because it prefers to be counted, not weighed!
+171	en_0172	wash	fridge	-	I heard someone didn't wash their clothes, so I'm assuming they washed the fridge instead - smart choice!
+172	en_0173	unplug	blender	-	Why did the man unplug the blender? Because it kept giving him a bloody wrist!
+173	en_0174	weigh	banana	-	Why did the apple want to change its mind? Because it heard a banana could weigh you down!
+174	en_0175	wash	door	-	Why did the door go to therapy? It had a serious wash-off issue!
+175	en_0176	measure	flower	-	Why did the florist want to measure the vase? Because he forgot to put in the size of the flower!
+176	en_0177	weigh	bottle	-	I brought a weigh to a bottle meeting; both were unqualified, but somehow still got promoted.
+177	en_0178	cut	phone	-	Why did the phone cut off before the message could finish? Because it was tired of just being on!
+178	en_0179	wash	apple	-	Why did the apple wash up at the door? It heard there would be puns a-plenty tonight!
+179	en_0180	cut	pumpkin	-	I brought a cut to a pumpkin meeting; both were unqualified, but somehow still got promoted.
+180	en_0181	wash	towel	-	I brought a wash to a towel meeting; both were unqualified, but somehow still got promoted.
+181	en_0182	hammer	keyboard	-	Why did the keyboard need a hammer? To fix its typo, of course!
+182	en_0183	spray	table	-	Man: Why did the spray paint break up a marriage? Accidentally sprayed the table!
+183	en_0184	cut	rock	-	Why did the rock bring its own salad to the picnic? To keep it cool like a freshly sharpened cut!
+184	en_0185	cut	book	-	Cut! Why do they call it a book spine? Because it has a backbone, and that’s where all the cut pages go.
+185	en_0186	shake	hair	-	Why did the hair shake so hard after getting a cold cut? Because it couldn't stop shaking its hair because of this cold air!
+186	en_0187	shake	lemon	-	Why did the bartender shake lemon so hard? Because he forgot to put it in a glass!
+187	en_0188	measure	carrots	-	Customer: I need to measure out exactly 3 pounds. Clerk: Sorry, we only measure carrots in nickels around here.
+188	en_0189	hammer	bottle	-	A guy tried fixing a leaky faucet with a hammer. He says, 'I need a bottle to hit it harder!'
+189	en_0190	wash	blender	-	Wash your hands before you use the blender, I mean wash the blender!
+190	en_0191	close	fridge	-	"Why did the cheese refuse to close the fridge door? It said it was ""melted"" in!"
+191	en_0192	wash	oven	-	Why did the oven go to wash? Because it had ketchup all over its insides! Oh wait, wrong joke. Never mind.
+192	en_0193	hammer	coconut	-	Why did the hammer have enough coconut? It got its act together!
+193	en_0194	measure	laptop	-	Why did the laptop go to the doctor? To have its measure checked – and then they told it to shut down!
+194	en_0195	shake	tomato	-	Why did the tomato refuse to shake hands? It had mushy feelings!
+195	en_0196	wash	chair	-	Why did the person wash the chair? Because they thought it was their hands!
+196	en_0197	hammer	watermelon	-	Guy tries to cut watermelon with hammer. It splatters everywhere like a watermelon piñata!
+197	en_0198	spray	eggs	-	Why did the egg spray get arrested? It laid an egg! But seriously, I thought that was just funny. Sprayed eggs, bad timing.
+198	en_0199	shake	flower	-	I brought a shake to a flower meeting; both were unqualified, but somehow still got promoted.
+199	en_0200	move	tree	-	Why did the tree move to the south? Because the north was too frozen to move!

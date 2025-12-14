@@ -1,15 +1,119 @@
 from __future__ import annotations
 
+import random
 import re
 import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Tuple, Optional
+from typing import Iterable, List, Tuple
 
 import torch
 import pandas as pd
 from transformers import AutoTokenizer, AutoModelForCausalLM
+
+import prompt_builder_title as pb
+
+
+# ---------------------------------------------------------------------------
+# Headline -> two nouns (anchors)
+# ---------------------------------------------------------------------------
+
+def _load_spacy_model():
+    try:
+        import spacy
+    except Exception as e:
+        raise RuntimeError(
+            "spaCy is required. Install it and download the model:\n"
+            "pip install spacy\n"
+            "python -m spacy download en_core_web_sm"
+        ) from e
+
+    try:
+        return spacy.load("en_core_web_sm")
+    except Exception as e:
+        raise RuntimeError(
+            "spaCy model en_core_web_sm is missing.\n"
+            "Run: python -m spacy download en_core_web_sm"
+        ) from e
+
+
+_NLP = None
+
+
+def choose_two_nouns_from_label(
+    gt_text_label: str,
+    *,
+    seed: int | None = None,
+    prefer_distinct: bool = True,
+) -> tuple[str, str]:
+    """
+    Takes text (here: a headline) and returns exactly two noun lemmas.
+
+    - Extract NOUN / PROPN lemmas using spaCy.
+    - Remove trivial lemmas.
+    - Prefer distinct nouns; if not possible, duplicate the only one.
+    - If no nouns, fall back to adjectives/verbs, then alphabetic tokens.
+    """
+    global _NLP
+    if _NLP is None:
+        _NLP = _load_spacy_model()
+
+    if seed is not None:
+        rnd = random.Random(seed)
+    else:
+        rnd = random
+
+    text = (gt_text_label or "").strip()
+    if not text:
+        return ("", "")
+
+    doc = _NLP(text)
+
+    nouns: List[str] = []
+    for t in doc:
+        if t.pos_ in {"NOUN", "PROPN"}:
+            lemma = t.lemma_.strip().lower()
+            if lemma and lemma.isalpha() and len(lemma) > 2:
+                nouns.append(lemma)
+
+    junk = {
+        "thing", "stuff", "something", "anything", "everything",
+        "someone", "anyone", "everyone",
+    }
+    nouns = [n for n in nouns if n not in junk]
+
+    if nouns:
+        if prefer_distinct:
+            unique = list(dict.fromkeys(nouns))
+            if len(unique) >= 2:
+                w1, w2 = rnd.sample(unique, 2)
+                return (w1, w2)
+            return (unique[0], unique[0])
+        else:
+            if len(nouns) >= 2:
+                return tuple(rnd.sample(nouns, 2))  # type: ignore
+            return (nouns[0], nouns[0])
+
+    content: List[str] = []
+    for t in doc:
+        if t.pos_ in {"ADJ", "VERB"}:
+            lemma = t.lemma_.strip().lower()
+            if lemma and lemma.isalpha() and len(lemma) > 2:
+                content.append(lemma)
+
+    if content:
+        unique = list(dict.fromkeys(content))
+        if len(unique) >= 2:
+            return tuple(rnd.sample(unique, 2))  # type: ignore
+        return (unique[0], unique[0])
+
+    tokens = [t.text.lower() for t in doc if t.text.isalpha() and len(t.text) > 2]
+    if len(tokens) >= 2:
+        return tuple(rnd.sample(tokens, 2))  # type: ignore
+    if len(tokens) == 1:
+        return (tokens[0], tokens[0])
+    return ("", "")
 
 
 # ---------------------------------------------------------------------------
@@ -37,20 +141,29 @@ class InferenceConfig:
     output_dir: Path = OUTPUT_DIR
     output_filename: str = "task-a-title_predictions_base.tsv"
 
-    # Decoding (keep quality)
+    # Deterministic noun selection
+    noun_seed_base: int = 1337
+
+    # Plan decoding (pass one)
+    plan_max_new_tokens: int = 80
+    plan_min_new_tokens: int = 16
+    plan_temperature: float = 0.4
+    plan_top_p: float = 0.9
+
+    # Final decoding (pass two)
     max_new_tokens: int = 32
     min_new_tokens: int = 6
     temperature: float = 0.8
     top_p: float = 0.95
     do_sample: bool = True
 
-    # Throughput
-    batch_size: int = 16  # increase if you have headroom; length bucketing makes this cheaper
+    batch_size: int = 16
 
-    # “Zero empty cells” policy
-    max_retries: int = 1  # reduce extra GPU passes
+    # Retries for final jokes only
+    max_retries: int = 2
     retry_settings: Tuple[Tuple[float, float, int], ...] = (
-        (1.0, 0.98, 48),
+        (0.95, 0.98, 40),
+        (1.05, 0.98, 48),
     )
 
     drive_output_dir: str = "/content/drive/MyDrive/MWAHAHA_outputs"
@@ -58,18 +171,9 @@ class InferenceConfig:
 
 cfg = InferenceConfig()
 
-# Short system prompt = less compute per sample, usually no quality loss for one-line punchlines
-# Fix 1: Do not include literal role words like "assistant", "user", "system" as examples in the prompt.
-SYSTEM_PROMPT = (
-    "You are a stand-up comedian. Write ONE original joke in English inspired by the headline. "
-    "Return exactly one line under 30 words. No preface, no explanation, no emojis. "
-    "Do not output any chat markers, speaker labels, or formatting headers. Output only the joke text. "
-    "Follow user constraints. Avoid hate, slurs, explicit sex, and graphic violence."
-)
-
 
 # ---------------------------------------------------------------------------
-# Speed knobs (no quality loss in practice)
+# Speed knobs
 # ---------------------------------------------------------------------------
 
 def configure_fast_kernels():
@@ -88,14 +192,9 @@ def configure_fast_kernels():
 
 def load_model_and_tokenizer():
     print("Loading tokenizer from base model:", cfg.base_model_id)
-    tokenizer = AutoTokenizer.from_pretrained(
-        cfg.base_model_id,
-        trust_remote_code=True,
-    )
+    tokenizer = AutoTokenizer.from_pretrained(cfg.base_model_id, trust_remote_code=True)
 
-    # Decoder-only models: left padding is safer for batched generation
     tokenizer.padding_side = "left"
-
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -108,13 +207,9 @@ def load_model_and_tokenizer():
         device_map = "auto"
         print("CUDA not available, using CPU (float32)")
 
-    # Prefer faster attention implementations if available
-    # - flash_attention_2: fastest if installed and GPU supports it
-    # - sdpa: PyTorch scaled dot product attention (usually faster than eager)
     attn_impl_candidates = ["flash_attention_2", "sdpa", "eager"]
     last_err = None
     model = None
-
     for attn_impl in attn_impl_candidates:
         try:
             print(f"Loading base model with attention implementation: {attn_impl}")
@@ -131,10 +226,9 @@ def load_model_and_tokenizer():
             model = None
 
     if model is None:
-        raise RuntimeError(f"Failed to load model with any attention implementation. Last error: {last_err}")
+        raise RuntimeError(f"Failed to load model. Last error: {last_err}")
 
     model.eval()
-
     model.generation_config.pad_token_id = tokenizer.pad_token_id
     model.generation_config.eos_token_id = tokenizer.eos_token_id
 
@@ -143,93 +237,61 @@ def load_model_and_tokenizer():
 
 
 # ---------------------------------------------------------------------------
-# Prompt + batching
+# Validation + fallbacks
 # ---------------------------------------------------------------------------
 
-# Fix 3: Improve headline relevance by forcing inclusion of at least one keyword from the headline.
-_STOPWORDS = {
-    "the", "a", "an", "and", "or", "but", "if", "then", "else", "when", "while",
-    "to", "of", "in", "on", "for", "at", "by", "with", "from", "as",
-    "is", "are", "was", "were", "be", "been", "being",
-    "it", "its", "this", "that", "these", "those",
-}
-
-def extract_keywords(headline: str, k: int = 3) -> List[str]:
-    words = re.findall(r"[A-Za-z]+", headline.lower())
-    words = [w for w in words if len(w) >= 4 and w not in _STOPWORDS]
-
-    out: List[str] = []
-    for w in words:
-        if w not in out:
-            out.append(w)
-        if len(out) >= k:
-            break
-    return out
+def _boundary_pattern(phrase: str) -> re.Pattern:
+    p = re.escape(pb.safe_word(phrase))
+    return re.compile(rf"(?<![A-Za-z0-9]){p}(?![A-Za-z0-9])")
 
 
-_whitespace_re = re.compile(r"\s+")
-
-def normalize_one_line(text: str) -> str:
-    if text is None:
-        return ""
-    text = str(text).replace("\n", " ").replace("\r", " ")
-    text = _whitespace_re.sub(" ", text).strip()
-    return text
-
-
-def make_user_prompt_from_headline(headline: str) -> str:
-    h = normalize_one_line(headline)
-    kws = extract_keywords(h, k=3)
-    if kws:
-        return (
-            f"Headline: {h}\n"
-            f"Write one joke inspired by the headline. "
-            f"Include at least one of these words: {', '.join(kws)}."
-        )
-    return f"Headline: {h}\nWrite one joke inspired by the headline."
+def anchor_nouns_present(text: str, noun1: str, noun2: str) -> bool:
+    t = pb.normalize_one_line(text)
+    if not t:
+        return False
+    n1 = pb.safe_word(noun1)
+    n2 = pb.safe_word(noun2)
+    if not n1 or not n2:
+        return False
+    p1 = _boundary_pattern(n1).search(t) is not None
+    p2 = _boundary_pattern(n2).search(t) is not None
+    return p1 and p2
 
 
-# Fix 1: Do not add an explicit assistant message; let the chat template add the generation prompt.
-def build_chat_prompt(tokenizer, user_prompt: str) -> str:
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
-    ]
-    text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
+def fallback_plan() -> str:
+    return pb.normalize_one_line(
+        '{"angle":"obvious headline irony","misdirection":"literal reading","word_placement":"use both nouns in the punchline","device":"reversal"}'
     )
-    return text
 
+
+def fallback_joke(headline: str, noun1: str, noun2: str) -> str:
+    h = pb.normalize_one_line(headline)
+    n1 = pb.safe_word(noun1) or "news"
+    n2 = pb.safe_word(noun2) or "headline"
+    if not h:
+        return pb.normalize_one_line(f"My {n1} met a {n2}; somehow both still made the evening news.")
+    return pb.normalize_one_line(f"After '{h}', my {n1} hired a {n2} for public relations. It went exactly as well as you think.")
+
+
+# ---------------------------------------------------------------------------
+# Chat template helper
+# ---------------------------------------------------------------------------
+
+def to_chat_text(tokenizer, messages: List[dict]) -> str:
+    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+
+# ---------------------------------------------------------------------------
+# Batching
+# ---------------------------------------------------------------------------
 
 def batched(items: List[int], batch_size: int) -> Iterable[List[int]]:
     for i in range(0, len(items), batch_size):
-        yield items[i: i + batch_size]
+        yield items[i : i + batch_size]
 
 
-def order_by_length(prompts: List[str]) -> Tuple[List[int], List[int]]:
-    """
-    Returns:
-      order: indices sorted by prompt length (ascending)
-      inv: inverse permutation so outputs can be restored to original order
-    """
-    order = sorted(range(len(prompts)), key=lambda i: len(prompts[i]))
-    inv = [0] * len(prompts)
-    for new_pos, old_idx in enumerate(order):
-        inv[old_idx] = new_pos
-    return order, inv
-
-
-# ---------------------------------------------------------------------------
-# Fallback (guarantees non-empty)
-# ---------------------------------------------------------------------------
-
-def fallback_punchline(headline: str) -> str:
-    h = normalize_one_line(headline)
-    if h == "":
-        return "I wrote a punchline, but it walked off stage without me."
-    return f"Even '{h}' tried to be serious, but it could not keep a straight face."
+def order_by_length(texts: List[str]) -> List[int]:
+    return sorted(range(len(texts)), key=lambda i: len(texts[i]))
 
 
 # ---------------------------------------------------------------------------
@@ -240,29 +302,19 @@ def fallback_punchline(headline: str) -> str:
 def generate_batch_once(
     model,
     tokenizer,
-    batch_prompts: List[str],
+    chat_texts: List[str],
     temperature: float,
     top_p: float,
     max_new_tokens: int,
     min_new_tokens: int,
 ) -> List[str]:
-    texts = [build_chat_prompt(tokenizer, p) for p in batch_prompts]
-
-    inputs = tokenizer(
-        texts,
-        return_tensors="pt",
-        padding=True,
-        truncation=True,
-    )
-
+    inputs = tokenizer(chat_texts, return_tensors="pt", padding=True, truncation=True)
     input_ids = inputs["input_ids"].to(model.device)
     attention_mask = inputs["attention_mask"].to(model.device)
 
-    # Fix 2: Correct boundary for left-padded batches.
-    # The generated tokens begin after the padded prompt width, not after attention_mask.sum().
+    # Correct boundary for left padding: generated tokens start after padded prompt width
     prompt_len = input_ids.shape[1]
 
-    # Fix 1: Block common chat markers / role words from being generated.
     BAD_PHRASES = [
         "assistant", "assistant:", "user", "user:", "system", "system:",
         "assistant user", "<tool call>", "</tool call>",
@@ -285,102 +337,156 @@ def generate_batch_once(
 
     new_tokens = gen_ids[:, prompt_len:]
     decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-    return [normalize_one_line(x) for x in decoded]
+    return [pb.normalize_one_line(x) for x in decoded]
 
 
-@torch.inference_mode()
-def generate_responses_strict_non_empty(
+def generate_all(
     model,
     tokenizer,
-    prompts: List[str],
+    chat_texts: List[str],
     batch_size: int,
-    fallback_headlines: Optional[List[str]] = None,
+    temperature: float,
+    top_p: float,
+    max_new_tokens: int,
+    min_new_tokens: int,
+    label: str,
 ) -> List[str]:
-    total = len(prompts)
-    outputs_sorted: List[str] = [""] * total
-
-    if fallback_headlines is None:
-        fallback_headlines = prompts
-
-    # Length bucketing = fewer padded tokens = less real GPU compute
-    order, inv = order_by_length(prompts)
-    start_all = time.time()
+    n = len(chat_texts)
+    outputs: List[str] = [""] * n
+    order = order_by_length(chat_texts)
 
     for batch_index, batch_ids in enumerate(batched(order, batch_size), start=1):
-        batch_prompts = [prompts[i] for i in batch_ids]
+        batch_texts = [chat_texts[i] for i in batch_ids]
+        print(f"\n[{label} batch {batch_index}] size={len(batch_ids)}")
 
-        print(f"\n[Batch {batch_index}] size={len(batch_ids)}")
         batch_out = generate_batch_once(
             model=model,
             tokenizer=tokenizer,
-            batch_prompts=batch_prompts,
-            temperature=cfg.temperature,
-            top_p=cfg.top_p,
-            max_new_tokens=cfg.max_new_tokens,
-            min_new_tokens=cfg.min_new_tokens,
+            chat_texts=batch_texts,
+            temperature=temperature,
+            top_p=top_p,
+            max_new_tokens=max_new_tokens,
+            min_new_tokens=min_new_tokens,
         )
 
-        for idx_in_batch, out_text in enumerate(batch_out):
-            outputs_sorted[batch_ids[idx_in_batch]] = out_text
+        for j, out_text in enumerate(batch_out):
+            outputs[batch_ids[j]] = out_text
 
-    # Retry only empties (keep retries minimal to reduce extra GPU passes)
-    empty_indices = [i for i, x in enumerate(outputs_sorted) if normalize_one_line(x) == ""]
-    print(f"\nInitial empty predictions: {len(empty_indices)}")
+    return outputs
 
+
+@torch.inference_mode()
+def generate_headline_predictions_with_plans(
+    model,
+    tokenizer,
+    headlines: List[str],
+    noun1_list: List[str],
+    noun2_list: List[str],
+    batch_size: int,
+) -> List[str]:
+    n = len(headlines)
+    start_all = time.time()
+
+    # Pass 1: plans for all
+    plan_texts = [
+        to_chat_text(tokenizer, pb.build_plan_messages(headlines[i], noun1_list[i], noun2_list[i]))
+        for i in range(n)
+    ]
+    plans = generate_all(
+        model=model,
+        tokenizer=tokenizer,
+        chat_texts=plan_texts,
+        batch_size=batch_size,
+        temperature=cfg.plan_temperature,
+        top_p=cfg.plan_top_p,
+        max_new_tokens=cfg.plan_max_new_tokens,
+        min_new_tokens=cfg.plan_min_new_tokens,
+        label="PLAN",
+    )
+    plans = [p if pb.normalize_one_line(p) else fallback_plan() for p in plans]
+
+    # Pass 2: final jokes for all
+    final_texts = [
+        to_chat_text(tokenizer, pb.build_final_messages(headlines[i], noun1_list[i], noun2_list[i], plans[i]))
+        for i in range(n)
+    ]
+    outputs = generate_all(
+        model=model,
+        tokenizer=tokenizer,
+        chat_texts=final_texts,
+        batch_size=batch_size,
+        temperature=cfg.temperature,
+        top_p=cfg.top_p,
+        max_new_tokens=cfg.max_new_tokens,
+        min_new_tokens=cfg.min_new_tokens,
+        label="FINAL",
+    )
+
+    def is_good(i: int) -> bool:
+        t = outputs[i]
+        if pb.normalize_one_line(t) == "":
+            return False
+        return anchor_nouns_present(t, noun1_list[i], noun2_list[i])
+
+    bad_indices = [i for i in range(n) if not is_good(i)]
+    print(f"\nInitial final failures (empty or missing anchor nouns): {len(bad_indices)}")
+
+    strict_suffix = (
+        "IMPORTANT: The answer is INVALID unless it includes BOTH anchor nouns exactly as written. "
+        "Output only the joke."
+    )
+
+    # Retry final only (keep plan fixed)
     for retry_round, (temp, tp, mx) in enumerate(cfg.retry_settings[: cfg.max_retries], start=1):
-        if not empty_indices:
+        if not bad_indices:
             break
-        print(f"\nRetry round {retry_round}: temperature={temp}, top_p={tp}, max_new_tokens={mx}")
 
-        retry_prompts = [prompts[i] for i in empty_indices]
-        retry_out_all: List[str] = []
+        print(f"\nFINAL retry round {retry_round}: temperature={temp}, top_p={tp}, max_new_tokens={mx}")
 
-        # Keep retries batched (still benefits from padding reduction inside the retry subset)
-        retry_order, _ = order_by_length(retry_prompts)
-        for chunk_ids in batched(retry_order, batch_size):
-            chunk_prompts = [retry_prompts[j] for j in chunk_ids]
-            retry_out_all.extend(
-                generate_batch_once(
-                    model=model,
-                    tokenizer=tokenizer,
-                    batch_prompts=chunk_prompts,
-                    temperature=temp,
-                    top_p=tp,
-                    max_new_tokens=mx,
-                    min_new_tokens=max(cfg.min_new_tokens, 8),
-                )
-            )
+        retry_texts = []
+        for i in bad_indices:
+            msgs = pb.build_final_messages(headlines[i], noun1_list[i], noun2_list[i], plans[i])
+            msgs = [dict(msgs[0]), dict(msgs[1])]
+            msgs[1]["content"] = pb.normalize_one_line(msgs[1]["content"] + "\n" + strict_suffix)
+            retry_texts.append(to_chat_text(tokenizer, msgs))
 
-        # retry_out_all is in retry_order; map back
-        retry_out = [""] * len(retry_prompts)
-        for pos, j in enumerate(retry_order):
-            retry_out[j] = retry_out_all[pos]
+        retry_out = generate_all(
+            model=model,
+            tokenizer=tokenizer,
+            chat_texts=retry_texts,
+            batch_size=batch_size,
+            temperature=temp,
+            top_p=tp,
+            max_new_tokens=mx,
+            min_new_tokens=max(cfg.min_new_tokens, 8),
+            label=f"FINAL RETRY {retry_round}",
+        )
 
-        still_empty: List[int] = []
-        for orig_idx, new_text in zip(empty_indices, retry_out):
-            new_text = normalize_one_line(new_text)
-            if new_text != "":
-                outputs_sorted[orig_idx] = new_text
+        new_bad: List[int] = []
+        for pos, i in enumerate(bad_indices):
+            candidate = pb.normalize_one_line(retry_out[pos])
+            if candidate and anchor_nouns_present(candidate, noun1_list[i], noun2_list[i]):
+                outputs[i] = candidate
             else:
-                still_empty.append(orig_idx)
+                new_bad.append(i)
 
-        empty_indices = still_empty
-        print(f"Empty predictions after retry round {retry_round}: {len(empty_indices)}")
+        bad_indices = new_bad
+        print(f"Final failures after retry round {retry_round}: {len(bad_indices)}")
 
-    # Final guarantee: never output empty
-    if empty_indices:
-        print(f"\nApplying fallback for remaining empties: {len(empty_indices)}")
-        for idx in empty_indices:
-            outputs_sorted[idx] = fallback_punchline(fallback_headlines[idx])
+    # Final guarantee
+    if bad_indices:
+        print(f"\nApplying fallback for remaining failures: {len(bad_indices)}")
+        for i in bad_indices:
+            outputs[i] = fallback_joke(headlines[i], noun1_list[i], noun2_list[i])
 
-    final_empty = [i for i, x in enumerate(outputs_sorted) if normalize_one_line(x) == ""]
-    if final_empty:
-        raise RuntimeError(f"Non-empty guarantee failed at indices: {final_empty[:20]}")
+    still_bad = [
+        i for i in range(n)
+        if pb.normalize_one_line(outputs[i]) == "" or not anchor_nouns_present(outputs[i], noun1_list[i], noun2_list[i])
+    ]
+    if still_bad:
+        raise RuntimeError(f"Validation failed for indices: {still_bad[:20]}")
 
     print(f"\nAll generations done in {time.time() - start_all:.1f}s total.")
-
-    # Restore original order (outputs_sorted is already indexed by original idx)
-    outputs = outputs_sorted
     return outputs
 
 
@@ -407,7 +513,7 @@ def save_and_zip(df_out: pd.DataFrame, output_dir: Path, filename: str) -> Path:
 def copy_to_drive(zip_path: Path, drive_dir: str):
     try:
         from google.colab import drive as colab_drive  # noqa: F401
-    except ImportError:
+    except Exception:
         print("Not running in Colab, skipping Google Drive upload.")
         return
 
@@ -436,34 +542,44 @@ def main():
     configure_fast_kernels()
 
     print("Loading data from:", cfg.input_path)
+    # Your earlier scripts read task-a-title.csv using tab separator
     df = pd.read_csv(cfg.input_path, sep="\t", keep_default_na=False)
 
     if "headline" not in df.columns:
-        raise ValueError(f"'headline' column not found in {cfg.input_path}")
+        raise ValueError(f"Missing required column 'headline' in {cfg.input_path}")
 
     df["headline"] = df["headline"].fillna("").astype(str)
-
     headlines = df["headline"].tolist()
-    prompts = [make_user_prompt_from_headline(h) for h in headlines]  # Fix 3
-    print(f"Total prompts: {len(prompts)}")
+    print(f"Total rows: {len(headlines)}")
+
+    noun1_list: List[str] = []
+    noun2_list: List[str] = []
+    for i, h in enumerate(headlines):
+        seed = cfg.noun_seed_base + i
+        n1, n2 = choose_two_nouns_from_label(h, seed=seed, prefer_distinct=True)
+        noun1_list.append(n1)
+        noun2_list.append(n2)
 
     model, tokenizer = load_model_and_tokenizer()
 
-    predictions = generate_responses_strict_non_empty(
+    predictions = generate_headline_predictions_with_plans(
         model=model,
         tokenizer=tokenizer,
-        prompts=prompts,
+        headlines=headlines,
+        noun1_list=noun1_list,
+        noun2_list=noun2_list,
         batch_size=cfg.batch_size,
-        fallback_headlines=headlines,
     )
 
     df_out = df.copy()
+    # Optional: keep anchors for debugging. Remove if submission format is strict.
+    df_out["noun1"] = noun1_list
+    df_out["noun2"] = noun2_list
     df_out["prediction"] = predictions
 
-    # Benchmark requirement: exactly zero empty cells
-    empty_count = (df_out["prediction"].astype(str).map(normalize_one_line) == "").sum()
+    empty_count = (df_out["prediction"].astype(str).map(pb.normalize_one_line) == "").sum()
     if empty_count != 0:
-        raise RuntimeError(f"Benchmark requirement failed: {empty_count} empty predictions")
+        raise RuntimeError(f"Requirement failed: {empty_count} empty predictions")
 
     zip_path = save_and_zip(df_out, cfg.output_dir, cfg.output_filename)
     copy_to_drive(zip_path, cfg.drive_output_dir)
