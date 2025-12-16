@@ -10,7 +10,7 @@ import torch
 import pandas as pd
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from ..prompt_builder import PromptBuilder, normalize_one_line, safe_word
+from inference.prompt_builder import PromptBuilder, normalize_one_line, safe_word
 
 
 # ---------------------------------------------------------------------------
