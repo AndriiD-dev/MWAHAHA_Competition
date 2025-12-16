@@ -3,11 +3,10 @@ from __future__ import annotations
 import random
 import re
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 from inference.config import DEFAULT_CONFIG, PromptBuilderConfig
 
-from inference.spacy_extractor import SpacyAnchorExtractor
+from inference.spacy_extractor import SpacyAnchorExtractor, RequiredWordsChecker
 from inference.wiki_reader import WikipediaReader
 
 
@@ -27,89 +26,6 @@ def safe_word(word: str) -> str:
 
 
 @dataclass
-class RequiredWordsChecker:
-    """Robust word/phrase presence checker.
-
-    Properties:
-    - case-insensitive match in the *generated text*
-    - preserves internal casing in the *required words* (no lowercasing/sanitizing)
-    - allows plural and possessive on the last token of a phrase
-    - treats word boundaries as non-alphanumeric (so punctuation works)
-    """
-
-    boundary_left: str = r"(?<![A-Za-z0-9])"
-    boundary_right: str = r"(?![A-Za-z0-9])"
-    strict_if_len_leq: int = 3
-
-    @staticmethod
-    def safe_phrase_preserve_case(text: str) -> str:
-        t = normalize_one_line(text)
-        if not t:
-            return ""
-        # normalize curly apostrophe to straight for stable patterns
-        t = t.replace("’", "'")
-        # allow letters, digits, spaces, hyphens, apostrophes
-        t = re.sub(r"[^A-Za-z0-9 \-']", "", t)
-        t = _WS_RE.sub(" ", t).strip()
-        return t
-
-    def _token_plural_possessive_pattern(self, token: str) -> str:
-        base = token.lower()
-        if not base:
-            return r"a^"
-
-        # strict for short tokens / acronyms / mixed tokens
-        if len(base) <= self.strict_if_len_leq or not base.isalpha():
-            return re.escape(base)
-
-        if base.endswith("y") and len(base) > 3:
-            stem = re.escape(base[:-1])
-            core = rf"{stem}(?:y|ies)"
-        else:
-            core = re.escape(base) + r"(?:s|es)?"
-
-        # possessive (straight or curly); allow plural possessive too
-        core += r"(?:'s|’s|s'|s’)?"
-        return core
-
-    @lru_cache(maxsize=4096)
-    def boundary_pattern(self, phrase: str) -> re.Pattern:
-        p = self.safe_phrase_preserve_case(phrase)
-        if not p:
-            return re.compile(r"a^")
-
-        parts = p.split()
-        if not parts:
-            return re.compile(r"a^")
-
-        head_tokens = parts[:-1]
-        last_token = parts[-1]
-
-        head_pat = ""
-        if head_tokens:
-            head_pat = r"\s+".join(re.escape(x.lower()) for x in head_tokens) + r"\s+"
-
-        last_pat = self._token_plural_possessive_pattern(last_token)
-
-        full = rf"{self.boundary_left}{head_pat}{last_pat}{self.boundary_right}"
-        return re.compile(full, flags=re.IGNORECASE)
-
-    def required_words_present(self, text: str, word1: str, word2: str) -> bool:
-        t = normalize_one_line(text)
-        if not t:
-            return False
-
-        w1 = self.safe_phrase_preserve_case(word1)
-        w2 = self.safe_phrase_preserve_case(word2)
-        if not w1 or not w2:
-            return False
-
-        return (self.boundary_pattern(w1).search(t) is not None) and (
-            self.boundary_pattern(w2).search(t) is not None
-        )
-
-
-@dataclass
 class PromptBuilder:
     """Single source of truth for prompt construction.
 
@@ -126,6 +42,9 @@ class PromptBuilder:
     checker: RequiredWordsChecker = field(default_factory=RequiredWordsChecker)
 
     def __post_init__(self) -> None:
+        if self.checker is None:
+            self.checker = RequiredWordsChecker(settings=self.config.required_words)
+
         if self.wiki is None:
             self.wiki = WikipediaReader(settings=self.config.wiki)
             try:
@@ -144,6 +63,7 @@ class PromptBuilder:
     # Validation helpers
     # ------------------------------------------------------------------
     def required_words_present(self, text: str, word1: str, word2: str) -> bool:
+        assert self.checker is not None
         return self.checker.required_words_present(text, word1, word2)
 
     # ------------------------------------------------------------------
