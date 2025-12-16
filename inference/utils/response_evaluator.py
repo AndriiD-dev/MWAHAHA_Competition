@@ -15,7 +15,6 @@ from inference.utils.spacy_extractor import RequiredWordsChecker
 class ResponseEvaluator:
     rng: random.Random = field(default_factory=random.Random)
 
-    # IMPORTANT: must be an INSTANCE, not the class
     config: ResponseEvaluatorConfig = field(default_factory=ResponseEvaluatorConfig)
 
     checker: Optional[RequiredWordsChecker] = None

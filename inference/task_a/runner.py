@@ -7,7 +7,7 @@ import time
 import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 import torch
@@ -15,6 +15,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from inference.utils.prompt_builder import PromptBuilder, normalize_one_line, safe_word
 from inference.utils.response_evaluator import ResponseEvaluator
+from inference.utils.structured_logger import StructuredLogger
 
 
 # =============================================================================
@@ -39,29 +40,28 @@ class RetryStep:
 
 @dataclass(frozen=True)
 class RunnerConfig:
-    # "two_words" or "title"
-    task: str
+    task: str  # "two_words" or "title"
 
     base_model_id: str
-
     input_path: Path
     output_dir: Path
     output_filename: str
 
-    batch_size: int = 16
+    batch_size: int = 8
 
     plan_decode: DecodeConfig = DecodeConfig(
-        max_new_tokens=72,
+        max_new_tokens=96,
         min_new_tokens=16,
-        temperature=0.4,
-        top_p=0.9,
+        temperature=0.7,
+        top_p=0.95,
         do_sample=True,
     )
+
     final_decode: DecodeConfig = DecodeConfig(
-        max_new_tokens=32,
-        min_new_tokens=6,
-        temperature=0.8,
-        top_p=0.95,
+        max_new_tokens=64,
+        min_new_tokens=10,
+        temperature=0.9,
+        top_p=0.98,
         do_sample=True,
     )
 
@@ -78,176 +78,109 @@ class RunnerConfig:
     noun_seed_base: int = 1337
     replan_every: int = 3  # 0 disables replanning
 
-    # Colab drive copy
-    drive_output_dir: str = "/content/drive/MyDrive/MWAHAHA_outputs"
+    # Google Drive (optional)
+    drive_output_dir: Optional[str] = None
 
 
 # =============================================================================
-# Config loader (Python file path)
+# Loading config from a python file
 # =============================================================================
 
 def load_runner_config(config_path: Path) -> RunnerConfig:
-    """
-    Config file must define:
-        RUNNER_CONFIG = RunnerConfig(...)
-    or:
-        RUNNER_CONFIG = { ... } (keys match RunnerConfig fields)
-    or:
-        def get_config() -> RunnerConfig: ...
-    """
-    config_path = config_path.resolve()
-    spec = importlib.util.spec_from_file_location("mwahaha_run_config", str(config_path))
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    spec = importlib.util.spec_from_file_location("runner_config", config_path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load config module: {config_path}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+        raise RuntimeError(f"Could not import config: {config_path}")
 
-    if hasattr(mod, "get_config"):
-        cfg = mod.get_config()
-        if not isinstance(cfg, RunnerConfig):
-            raise TypeError("get_config() must return RunnerConfig")
-        return cfg
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
 
-    if not hasattr(mod, "RUNNER_CONFIG"):
-        raise AttributeError("Config file must define RUNNER_CONFIG or get_config().")
+    if not hasattr(module, "RUNNER_CONFIG"):
+        raise AttributeError("Config file must define RUNNER_CONFIG")
 
-    obj = getattr(mod, "RUNNER_CONFIG")
+    rc = getattr(module, "RUNNER_CONFIG")
 
-    if isinstance(obj, RunnerConfig):
-        return obj
+    if isinstance(rc, RunnerConfig):
+        return rc
+    if isinstance(rc, dict):
+        # Allow paths as strings
+        if "input_path" in rc and isinstance(rc["input_path"], str):
+            rc["input_path"] = Path(rc["input_path"])
+        if "output_dir" in rc and isinstance(rc["output_dir"], str):
+            rc["output_dir"] = Path(rc["output_dir"])
 
-    if isinstance(obj, dict):
-        data = dict(obj)
+        def _maybe_decode(key: str) -> None:
+            if key in rc and isinstance(rc[key], dict):
+                rc[key] = DecodeConfig(**rc[key])
 
-        # Allow string paths
-        for k in ("input_path", "output_dir"):
-            if k in data and isinstance(data[k], str):
-                data[k] = Path(data[k])
+        _maybe_decode("plan_decode")
+        _maybe_decode("final_decode")
 
-        # Nested dataclasses from dict
-        if "plan_decode" in data and isinstance(data["plan_decode"], dict):
-            data["plan_decode"] = DecodeConfig(**data["plan_decode"])
-        if "final_decode" in data and isinstance(data["final_decode"], dict):
-            data["final_decode"] = DecodeConfig(**data["final_decode"])
-        if "retry_steps" in data and isinstance(data["retry_steps"], (list, tuple)):
-            steps: List[RetryStep] = []
-            for it in data["retry_steps"]:
-                if isinstance(it, RetryStep):
-                    steps.append(it)
-                elif isinstance(it, dict):
-                    steps.append(RetryStep(**it))
-                else:
-                    raise TypeError("retry_steps items must be RetryStep or dict")
-            data["retry_steps"] = tuple(steps)
+        if "retry_steps" in rc and isinstance(rc["retry_steps"], (list, tuple)):
+            rs = []
+            for x in rc["retry_steps"]:
+                rs.append(RetryStep(**x) if isinstance(x, dict) else x)
+            rc["retry_steps"] = tuple(rs)
 
-        return RunnerConfig(**data)
+        return RunnerConfig(**rc)
 
     raise TypeError("RUNNER_CONFIG must be RunnerConfig or dict")
 
 
 # =============================================================================
-# Utilities
+# Small helpers
 # =============================================================================
 
 def configure_fast_kernels() -> None:
-    if torch.cuda.is_available():
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        try:
-            torch.set_float32_matmul_precision("high")
-        except Exception:
-            pass
+    # Safe defaults; do not crash if unsupported.
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
 
 
-def load_model_and_tokenizer(base_model_id: str):
-    print("Loading tokenizer from base model:", base_model_id)
-    tokenizer = AutoTokenizer.from_pretrained(base_model_id, trust_remote_code=True)
-
-    tokenizer.padding_side = "left"
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    if torch.cuda.is_available():
-        torch_dtype = torch.float16
-        device_map = "auto"
-        print("Using CUDA (float16)")
-    else:
-        torch_dtype = torch.float32
-        device_map = "auto"
-        print("CUDA not available, using CPU (float32)")
-
-    last_err = None
-    model = None
-    for attn_impl in ["flash_attention_2", "sdpa", "eager"]:
-        try:
-            print(f"Loading base model with attention implementation: {attn_impl}")
-            model = AutoModelForCausalLM.from_pretrained(
-                base_model_id,
-                torch_dtype=torch_dtype,
-                device_map=device_map,
-                trust_remote_code=True,
-                attn_implementation=attn_impl,
-            )
-            break
-        except Exception as e:
-            last_err = e
-            model = None
-
-    if model is None:
-        raise RuntimeError(f"Failed to load model. Last error: {last_err}")
-
-    model.eval()
-    model.generation_config.pad_token_id = tokenizer.pad_token_id
-    model.generation_config.eos_token_id = tokenizer.eos_token_id
-
-    print("Model main device:", next(model.parameters()).device)
-    return model, tokenizer
-
-
-def batched(items: List[int], batch_size: int) -> Iterable[List[int]]:
-    for i in range(0, len(items), batch_size):
-        yield items[i : i + batch_size]
+def batched(seq: Sequence[int], batch_size: int) -> Iterable[List[int]]:
+    for i in range(0, len(seq), batch_size):
+        yield list(seq[i : i + batch_size])
 
 
 def order_by_length(texts: List[str]) -> List[int]:
     return sorted(range(len(texts)), key=lambda i: len(texts[i]))
 
 
-def to_chat_text(tokenizer, messages: List[dict]) -> str:
+def to_chat_text(tokenizer: AutoTokenizer, messages: List[Dict[str, str]]) -> str:
     return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
 
-@torch.inference_mode()
+def load_model_and_tokenizer(model_id: str):
+    tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        device_map="auto" if torch.cuda.is_available() else None,
+    )
+    model.eval()
+    return model, tokenizer
+
+
 def generate_batch_once(model, tokenizer, chat_texts: List[str], decode: DecodeConfig) -> List[str]:
     inputs = tokenizer(chat_texts, return_tensors="pt", padding=True, truncation=True)
-    input_ids = inputs["input_ids"].to(model.device)
-    attention_mask = inputs["attention_mask"].to(model.device)
+    if torch.cuda.is_available():
+        inputs = {k: v.to("cuda") for k, v in inputs.items()}
 
-    prompt_len = input_ids.shape[1]
+    with torch.no_grad():
+        out = model.generate(
+            **inputs,
+            max_new_tokens=decode.max_new_tokens,
+            min_new_tokens=decode.min_new_tokens,
+            temperature=decode.temperature,
+            top_p=decode.top_p,
+            do_sample=decode.do_sample,
+            pad_token_id=tokenizer.eos_token_id,
+        )
 
-    bad_phrases = [
-        "assistant", "assistant:", "user", "user:", "system", "system:",
-        "assistant user", "<tool call>", "</tool call>",
-    ]
-    bad_words_ids = tokenizer(bad_phrases, add_special_tokens=False).input_ids
-
-    gen_ids = model.generate(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
-        max_new_tokens=decode.max_new_tokens,
-        min_new_tokens=decode.min_new_tokens,
-        do_sample=decode.do_sample,
-        temperature=decode.temperature,
-        top_p=decode.top_p,
-        pad_token_id=tokenizer.pad_token_id,
-        eos_token_id=tokenizer.eos_token_id,
-        use_cache=True,
-        bad_words_ids=bad_words_ids,
-    )
-
-    new_tokens = gen_ids[:, prompt_len:]
-    decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-    return [normalize_one_line(x) for x in decoded]
+    decoded = tokenizer.batch_decode(out, skip_special_tokens=True)
+    return decoded
 
 
 def generate_all(
@@ -257,6 +190,11 @@ def generate_all(
     batch_size: int,
     decode: DecodeConfig,
     label: str,
+    *,
+    logger: Optional[StructuredLogger] = None,
+    metas: Optional[List[Dict[str, Any]]] = None,
+    eval_fn: Optional[Callable[[str, Optional[Dict[str, Any]]], Optional[Dict[str, Any]]]] = None,
+    note: Optional[str] = None,
 ) -> List[str]:
     n = len(chat_texts)
     outputs: List[str] = [""] * n
@@ -265,7 +203,37 @@ def generate_all(
     for batch_index, batch_ids in enumerate(batched(order, batch_size), start=1):
         batch_texts = [chat_texts[i] for i in batch_ids]
         print(f"\n[{label} batch {batch_index}] size={len(batch_ids)}")
+
         batch_out = generate_batch_once(model, tokenizer, batch_texts, decode)
+
+        # Log only the first sample in the batch.
+        if logger is not None and batch_ids:
+            first_local = 0
+            first_global = batch_ids[first_local]
+
+            meta = None
+            if metas is not None and 0 <= first_global < len(metas):
+                meta = metas[first_global]
+
+            evaluation = None
+            if eval_fn is not None:
+                try:
+                    evaluation = eval_fn(batch_out[first_local], meta)
+                except Exception as exc:
+                    evaluation = {"error": f"{type(exc).__name__}: {exc}"}
+
+            logger.log_first_in_batch(
+                stage=label,
+                batch_index=batch_index,
+                batch_size=len(batch_ids),
+                example_index=first_global,
+                chat_text=batch_texts[first_local],
+                model_output=batch_out[first_local],
+                meta=meta,
+                evaluation=evaluation,
+                note=note,
+            )
+
         for j, out_text in enumerate(batch_out):
             outputs[batch_ids[j]] = out_text
 
@@ -288,22 +256,20 @@ def save_and_zip(df_out: pd.DataFrame, output_dir: Path, filename: str) -> Path:
     return zip_path
 
 
-def copy_to_drive(zip_path: Path, drive_dir: str) -> None:
-    try:
-        from google.colab import drive as colab_drive  # noqa: F401
-    except Exception:
-        print("Not running in Colab, skipping Google Drive upload.")
+def copy_to_drive(zip_path: Path, drive_dir: Optional[str]) -> None:
+    if not drive_dir:
         return
 
     drive_root = Path("/content/drive")
     if not drive_root.exists():
-        print("Google Drive is not mounted.")
+        print("Drive not mounted; skipping copy_to_drive.")
         return
 
     dest_dir = drive_root / Path(drive_dir).relative_to("/content/drive")
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     import shutil
+
     dest_path = dest_dir / zip_path.name
     shutil.copy2(zip_path, dest_path)
     print("Copied zip to Google Drive:", dest_path)
@@ -338,11 +304,17 @@ class InferenceRunner:
 
             noun1_list: List[str] = []
             noun2_list: List[str] = []
-            for i, h in enumerate(df["headline"].tolist()):
-                seed = int(self.cfg.noun_seed_base) + i
-                n1, n2 = self.builder.choose_two_nouns_from_headline(h, seed=seed, prefer_distinct=True)
-                noun1_list.append(n1)
-                noun2_list.append(n2)
+
+            for i, row in df.iterrows():
+                h = normalize_one_line(row["headline"])
+                if h == "":
+                    noun1_list.append("news")
+                    noun2_list.append("headline")
+                    continue
+
+                n1, n2 = self.builder.pick_nouns_from_headline(h, seed=self.cfg.noun_seed_base + int(i))
+                noun1_list.append(n1 or "news")
+                noun2_list.append(n2 or "headline")
 
             df["noun1"] = noun1_list
             df["noun2"] = noun2_list
@@ -364,19 +336,17 @@ class InferenceRunner:
         _ = (df, i)
         if self.cfg.task == "two_words":
             return normalize_one_line(
-                '{"scenario":"everyday misunderstanding","misdirection":"take it literally","word_placement":"use both words in the punchline","device":"reversal"}'
+                '{"scenario":"everyday misunderstanding","misdirection":"use word1 as a verb, then reveal it is a noun","anchor_placement":"use both words in the punchline","device":"reversal"}'
             )
         return normalize_one_line(
-            '{"angle":"obvious headline irony","misdirection":"literal reading","word_placement":"use both nouns in the punchline","device":"reversal"}'
+            '{"scenario":"news headline twist","misdirection":"literal reading of the headline","anchor_placement":"use both nouns in the punchline","device":"escalation"}'
         )
 
     def _fallback_output(self, df: pd.DataFrame, i: int) -> str:
         if self.cfg.task == "two_words":
             w1 = safe_word(df.loc[i, "word1"])
             w2 = safe_word(df.loc[i, "word2"])
-            return normalize_one_line(
-                f"I brought a {w1} to a {w2} meeting; both were unqualified, but somehow still got promoted."
-            )
+            return normalize_one_line(f"I brought a {w1} to a {w2} meeting; both were unqualified, but somehow still got promoted.")
 
         h = normalize_one_line(df.loc[i, "headline"])
         n1 = safe_word(df.loc[i, "noun1"]) or "news"
@@ -400,6 +370,37 @@ class InferenceRunner:
         n = len(df)
         start_all = time.time()
 
+        logger = StructuredLogger(enabled=True, max_chars=900)
+
+        metas: List[Dict[str, Any]] = []
+        for i in range(n):
+            if self.cfg.task == "two_words":
+                metas.append(
+                    {
+                        "anchors": {
+                            "word1": str(df.loc[i, "word1"]),
+                            "word2": str(df.loc[i, "word2"]),
+                        },
+                        "headline": None,
+                        "wikipedia_context": "",
+                        "microcards": [],
+                        "plan": None,
+                    }
+                )
+            else:
+                metas.append(
+                    {
+                        "anchors": {
+                            "noun1": str(df.loc[i, "noun1"]),
+                            "noun2": str(df.loc[i, "noun2"]),
+                        },
+                        "headline": str(df.loc[i, "headline"]),
+                        "wikipedia_context": "",
+                        "microcards": [],
+                        "plan": None,
+                    }
+                )
+
         # Pass 1: plans
         if self.cfg.task == "two_words":
             plan_texts = [
@@ -412,10 +413,19 @@ class InferenceRunner:
                 for i in range(n)
             ]
 
-        plans = generate_all(model, tokenizer, plan_texts, self.cfg.batch_size, self.cfg.plan_decode, "PLAN")
+        # Extract Wikipedia context and microcards from the prompt text (best-effort).
+        for i, chat_text in enumerate(plan_texts):
+            blocks = logger.extract_prompt_blocks(chat_text)
+            metas[i]["wikipedia_context"] = blocks.get("facts", "") or ""
+            metas[i]["microcards"] = blocks.get("microcards", []) or []
+
+        plans = generate_all(model, tokenizer, plan_texts, self.cfg.batch_size, self.cfg.plan_decode, "PLAN", logger=logger, metas=metas)
         for i, p in enumerate(plans):
             if normalize_one_line(p) == "":
                 plans[i] = self._fallback_plan(df, i)
+
+        for i, p in enumerate(plans):
+            metas[i]["plan"] = logger.try_parse_json(p) or p
 
         # Pass 2: finals
         if self.cfg.task == "two_words":
@@ -429,7 +439,30 @@ class InferenceRunner:
                 for i in range(n)
             ]
 
-        outputs = generate_all(model, tokenizer, final_texts, self.cfg.batch_size, self.cfg.final_decode, "FINAL")
+        def eval_fn_for_joke(output_text: str, meta: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+            anchors = (meta or {}).get("anchors") or {}
+            word1 = anchors.get("word1") or anchors.get("noun1") or ""
+            word2 = anchors.get("word2") or anchors.get("noun2") or ""
+
+            required_ok = self.response_evaluator.required_words_present(output_text, word1, word2)
+            humorous_ok = self.response_evaluator.is_humorous(output_text)
+            good_ok = bool(required_ok and humorous_ok)
+
+            return {
+                "required_words": {
+                    "word1": word1,
+                    "word2": word2,
+                    "present": bool(required_ok),
+                },
+                "humor_classifier": {
+                    "humorous": bool(humorous_ok),
+                },
+                "overall": {
+                    "good": good_ok,
+                },
+            }
+
+        outputs = generate_all(model, tokenizer, final_texts, self.cfg.batch_size, self.cfg.final_decode, "FINAL", logger=logger, metas=metas, eval_fn=eval_fn_for_joke)
 
         bad_indices = [i for i in range(n) if not self._is_good(df, i, outputs[i])]
         print(f"\nInitial final failures: {len(bad_indices)}")
@@ -462,7 +495,20 @@ class InferenceRunner:
                 msgs[1]["content"] = normalize_one_line(msgs[1]["content"] + "\n" + strict_suffix)
                 retry_texts.append(to_chat_text(tokenizer, msgs))
 
-            retry_out = generate_all(model, tokenizer, retry_texts, self.cfg.batch_size, retry_decode, f"FINAL RETRY {retry_round}")
+            retry_metas: List[Dict[str, Any]] = [metas[i] for i in bad_indices]
+
+            retry_out = generate_all(
+                model,
+                tokenizer,
+                retry_texts,
+                self.cfg.batch_size,
+                retry_decode,
+                f"FINAL RETRY {retry_round}",
+                logger=logger,
+                metas=retry_metas,
+                eval_fn=eval_fn_for_joke,
+                note="strict_suffix=true",
+            )
 
             new_bad: List[int] = []
             for pos, i in enumerate(bad_indices):
@@ -472,9 +518,9 @@ class InferenceRunner:
                 else:
                     new_bad.append(i)
             bad_indices = new_bad
-            print(f"Final failures after retry round {retry_round}: {len(bad_indices)}")
+            print(f"After retry {retry_round}: remaining failures = {len(bad_indices)}")
 
-            # Optional replanning for title
+            # Optional replanning for title task
             if (
                 bad_indices
                 and self.cfg.task == "title"
@@ -488,10 +534,23 @@ class InferenceRunner:
                     )
                     for i in bad_indices
                 ]
-                replan_out = generate_all(model, tokenizer, replan_texts, self.cfg.batch_size, self.cfg.plan_decode, f"REPLAN {retry_round}")
+
+                replan_metas: List[Dict[str, Any]] = [metas[i] for i in bad_indices]
+                replan_out = generate_all(
+                    model,
+                    tokenizer,
+                    replan_texts,
+                    self.cfg.batch_size,
+                    self.cfg.plan_decode,
+                    f"REPLAN {retry_round}",
+                    logger=logger,
+                    metas=replan_metas,
+                )
                 for pos, i in enumerate(bad_indices):
                     p = normalize_one_line(replan_out[pos])
                     plans[i] = p if p else plans[i]
+                    if p:
+                        metas[i]["plan"] = logger.try_parse_json(p) or p
 
         # Fallback for remaining failures
         if bad_indices:
@@ -509,21 +568,20 @@ class InferenceRunner:
         zip_path = save_and_zip(df_out, self.cfg.output_dir, self.cfg.output_filename)
         copy_to_drive(zip_path, self.cfg.drive_output_dir)
 
-        self.builder.save_wiki_cache()
-
-        print(f"\nAll generations done in {time.time() - start_all:.1f}s total.")
-        print("All done.")
+        elapsed = time.time() - start_all
+        print(f"\nDone. Total seconds: {elapsed:.1f}")
         return zip_path
 
 
-# =============================================================================
-# Command line entry point
-# =============================================================================
+def build_arg_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser()
+    p.add_argument("--config", type=str, required=True, help="Path to config.py defining RUNNER_CONFIG")
+    p.add_argument("--print_config", action="store_true", help="Print loaded config and exit")
+    return p
 
-def main(argv: Optional[Sequence[str]] = None) -> None:
-    parser = argparse.ArgumentParser(description="MWAHAHA unified inference runner")
-    parser.add_argument("--config", required=True, type=str, help="Path to a Python config file")
-    parser.add_argument("--print-config", action="store_true", help="Print resolved config and exit")
+
+def main(argv: Optional[List[str]] = None) -> None:
+    parser = build_arg_parser()
     args = parser.parse_args(argv)
 
     cfg = load_runner_config(Path(args.config))
