@@ -38,7 +38,7 @@ class PromptBuilder:
     spacy: SpacyAnchorExtractor | None = None
     rng: random.Random = field(default_factory=random.Random)
 
-    checker: RequiredWordsChecker = field(default_factory=RequiredWordsChecker)
+    checker: Optional[RequiredWordsChecker] = None
 
     def __post_init__(self) -> None:
         if self.checker is None:
