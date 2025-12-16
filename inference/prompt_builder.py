@@ -4,7 +4,7 @@ import random
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-from inference.config import DEFAULT_CONFIG, PromptBuilderConfig
+from inference.config import PromptBuilderConfig
 
 from inference.spacy_extractor import SpacyAnchorExtractor, RequiredWordsChecker
 from inference.wiki_reader import WikipediaReader
@@ -33,7 +33,7 @@ class PromptBuilder:
     - centralizes normalization and required-word validation
     """
 
-    config: PromptBuilderConfig = field(default_factory=lambda: DEFAULT_CONFIG)
+    config: PromptBuilderConfig = PromptBuilderConfig
     wiki: WikipediaReader | None = None
     spacy: SpacyAnchorExtractor | None = None
     rng: random.Random = field(default_factory=random.Random)
