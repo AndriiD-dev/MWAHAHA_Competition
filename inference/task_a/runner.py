@@ -161,6 +161,12 @@ def to_chat_text(tokenizer: AutoTokenizer, messages: List[Dict[str, str]]) -> st
 
 def load_model_and_tokenizer(model_id: str):
     tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=True)
+
+    tokenizer.padding_side = "left"
+
+    if tokenizer.pad_token_id is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
@@ -168,6 +174,7 @@ def load_model_and_tokenizer(model_id: str):
     )
     model.eval()
     return model, tokenizer
+
 
 
 def generate_batch_once(model, tokenizer, chat_texts: List[str], decode: DecodeConfig) -> List[str]:
