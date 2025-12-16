@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from inference.config import PromptBuilderConfig
 
-from inference.spacy_extractor import SpacyAnchorExtractor, RequiredWordsChecker
-from inference.wiki_reader import WikipediaReader
+from inference.utils.spacy_extractor import SpacyAnchorExtractor, RequiredWordsChecker
+from inference.utils.wiki_reader import WikipediaReader
 
 
 _WS_RE = re.compile(r"\s+")
