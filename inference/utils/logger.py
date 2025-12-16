@@ -3,12 +3,17 @@ from __future__ import annotations
 import json
 import re
 import time
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, TextIO
 
 
-def _now() -> str:
+def _now_hms() -> str:
     return time.strftime("%H:%M:%S")
+
+
+def _now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 def _short(s: Optional[str], max_chars: int) -> str:
@@ -37,9 +42,19 @@ def _truncate_value(v: Any, max_chars: int, max_list_items: int) -> Any:
 
 @dataclass
 class Logger:
+    """
+    File logger for "first sample per batch" structured logs.
+
+    - Writes pretty JSON blocks into a single log file.
+    - Does not print anything to stdout (runner keeps stdout for progress only).
+    """
+
     enabled: bool = True
+    log_path: Optional[Path] = None
     max_chars: int = 900
     max_list_items: int = 12
+
+    fh: Optional[TextIO] = field(default=None, init=False, repr=False)
 
     # Best-effort extractors (so you do not have to modify PromptBuilder right now).
     _re_facts: re.Pattern = re.compile(
@@ -51,6 +66,43 @@ class Logger:
     _re_plan_in_prompt: re.Pattern = re.compile(
         r"(?is)\bPLAN\b[^\n]*[:\-]?\s*(.*?)(?:\n\s*Write the final joke\b|\n\s*Constraints\b|\Z)"
     )
+
+    def __post_init__(self) -> None:
+        if not self.enabled:
+            return
+        if self.log_path is None:
+            return
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.fh = self.log_path.open("w", encoding="utf-8")
+        self._write_json_block(
+            {
+                "type": "run_start",
+                "time_iso": _now_iso(),
+                "time_hms": _now_hms(),
+                "log_path": str(self.log_path),
+            }
+        )
+
+    def close(self) -> None:
+        if self.fh is not None:
+            try:
+                self.fh.flush()
+            finally:
+                self.fh.close()
+            self.fh = None
+
+    def _write_json_block(self, obj: Dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        if self.fh is None:
+            return
+
+        safe_obj = _truncate_value(obj, self.max_chars, self.max_list_items)
+        txt = json.dumps(safe_obj, indent=2, ensure_ascii=False, default=str)
+
+        self.fh.write(txt)
+        self.fh.write("\n\n")  # separate blocks
+        self.fh.flush()
 
     def try_parse_json(self, s: str) -> Optional[Any]:
         s = (s or "").strip()
@@ -101,7 +153,6 @@ class Logger:
         lines = [ln.strip() for ln in block.split("\n")]
         items: List[str] = []
 
-        # Bullet or numbered lines
         for ln in lines:
             if not ln:
                 continue
@@ -113,9 +164,11 @@ class Logger:
         if items:
             return [x for x in items if x][: self.max_list_items]
 
-        # Paragraph split fallback
         paras = [p.strip() for p in block.split("\n\n") if p.strip()]
         return paras[: self.max_list_items]
+
+    def log_run_meta(self, meta: Dict[str, Any]) -> None:
+        self._write_json_block({"type": "run_meta", "time_iso": _now_iso(), "meta": meta})
 
     def log_first_in_batch(
         self,
@@ -132,12 +185,16 @@ class Logger:
     ) -> None:
         if not self.enabled:
             return
+        if self.fh is None:
+            return
 
         blocks = self.extract_prompt_blocks(chat_text)
         parsed_output = self.try_parse_json(model_output)
 
         event: Dict[str, Any] = {
-            "time": _now(),
+            "type": "sample",
+            "time_iso": _now_iso(),
+            "time_hms": _now_hms(),
             "stage": stage,
             "batch": {"index": batch_index, "size": batch_size},
             "example": {"index": example_index},
@@ -155,8 +212,23 @@ class Logger:
         if note:
             event["note"] = note
 
-        safe_event = _truncate_value(event, self.max_chars, self.max_list_items)
+        self._write_json_block(event)
 
-        print("\n" + "=" * 80)
-        print(json.dumps(safe_event, indent=2, ensure_ascii=False, default=str))
-        print("=" * 80)
+    def log_failed_jokes(self, items: List[Dict[str, Any]]) -> None:
+        self._write_json_block(
+            {
+                "type": "failed_jokes",
+                "time_iso": _now_iso(),
+                "count": len(items),
+                "items": items,
+            }
+        )
+
+    def log_run_end(self, summary: Dict[str, Any]) -> None:
+        self._write_json_block(
+            {
+                "type": "run_end",
+                "time_iso": _now_iso(),
+                "summary": summary,
+            }
+        )
