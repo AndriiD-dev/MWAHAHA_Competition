@@ -168,6 +168,8 @@ def generate_batch_once(model, tokenizer, chat_texts: List[str], decode: DecodeC
     if torch.cuda.is_available():
         inputs = {k: v.to("cuda") for k, v in inputs.items()}
 
+    prompt_len = inputs["input_ids"].shape[1]
+
     with torch.no_grad():
         out = model.generate(
             **inputs,
@@ -179,8 +181,11 @@ def generate_batch_once(model, tokenizer, chat_texts: List[str], decode: DecodeC
             pad_token_id=tokenizer.eos_token_id,
         )
 
-    decoded = tokenizer.batch_decode(out, skip_special_tokens=True)
+    # IMPORTANT: keep only the completion tokens (after the prompt)
+    gen_only = out[:, prompt_len:]
+    decoded = tokenizer.batch_decode(gen_only, skip_special_tokens=True)
     return decoded
+
 
 
 def generate_all(
