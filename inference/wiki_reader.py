@@ -9,7 +9,7 @@ from typing import Dict, Iterable, List, Tuple
 
 import requests
 
-from config import WikiSettings
+from inference.config import WikiSettings
 
 
 @dataclass

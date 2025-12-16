@@ -5,10 +5,10 @@ import re
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
-from config import DEFAULT_CONFIG, PromptBuilderConfig
+from inference.config import DEFAULT_CONFIG, PromptBuilderConfig
 
-from spacy_extractor import SpacyAnchorExtractor
-from wiki_reader import WikipediaReader
+from inference.spacy_extractor import SpacyAnchorExtractor
+from inference.wiki_reader import WikipediaReader
 
 
 _WS_RE = re.compile(r"\s+")
@@ -127,15 +127,7 @@ class PromptBuilder:
 
     def __post_init__(self) -> None:
         if self.wiki is None:
-            self.wiki = WikipediaReader(
-                summary_url_template=self.config.wiki.summary_url_template,
-                search_url=self.config.wiki.search_url,
-                headers=dict(self.config.wiki.headers),
-                timeout_seconds=self.config.wiki.timeout_seconds,
-                sleep_seconds=self.config.wiki.sleep_seconds,
-                search_limit=self.config.wiki.search_limit,
-                cache_max_entries=self.config.wiki.cache_max_entries,
-            )
+            self.wiki = WikipediaReader(settings=self.config.wiki)
             try:
                 self.wiki.load_cache(self.config.paths.wiki_cache_path)
             except Exception:
@@ -143,17 +135,9 @@ class PromptBuilder:
 
         if self.spacy is None:
             self.spacy = SpacyAnchorExtractor(
-                model_name=self.config.spacy.model_name,
-                disable_components=self.config.spacy.disable_components,
-                max_text_chars=self.config.spacy.max_text_chars,
-                allowed_parts_of_speech=self.config.spacy.allowed_parts_of_speech,
-                min_token_chars=self.config.spacy.min_token_chars,
-                allow_noun_chunks=self.config.spacy.allow_noun_chunks,
-                max_chunk_tokens=self.config.spacy.max_chunk_tokens,
+                settings=self.config.spacy,
                 generic_nouns=set(x.lower() for x in self.config.generic_nouns),
                 extra_stopwords=set(x.lower() for x in self.config.extra_stopwords),
-                prefer_one_from_each=self.config.spacy.prefer_one_from_each,
-                max_tries_per_pair=self.config.spacy.max_tries_per_pair,
             )
 
     # ------------------------------------------------------------------

@@ -9,7 +9,7 @@ import spacy
 from spacy.language import Language
 from spacy.tokens import Doc
 
-from config import RequiredWordsSettings, SpacySettings
+from inference.config import RequiredWordsSettings, SpacySettings
 
 
 @dataclass
