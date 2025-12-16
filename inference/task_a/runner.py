@@ -370,7 +370,7 @@ class InferenceRunner:
         n = len(df)
         start_all = time.time()
 
-        logger = StructuredLogger(enabled=True, max_chars=900)
+        logger = Logger(enabled=True, max_chars=900)
 
         metas: List[Dict[str, Any]] = []
         for i in range(n):
