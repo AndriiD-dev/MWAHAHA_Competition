@@ -225,3 +225,8 @@ class PromptBuilderConfig:
     extra_stopwords: FrozenSet[str] = frozenset({
         "yeah", "okay", "ok", "lol",
     })
+
+@dataclass(frozen=True)
+class ResponseEvaluatorConfig:
+    paths: ProjectPaths = field(default_factory=ProjectPaths)
+    required_words: RequiredWordsSettings = field(default_factory=RequiredWordsSettings)
