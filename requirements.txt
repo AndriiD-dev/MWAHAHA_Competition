@@ -5,6 +5,7 @@ transformers~=4.57.3
 trl~=0.26.1
 huggingface_hub~=0.36.0
 spacy~=3.8.11
+en-core-web-sm~=3.8.0
 
 accelerate>=1.0.1
 safetensors>=0.4.5
