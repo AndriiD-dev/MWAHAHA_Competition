@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 from inference.config import PromptBuilderConfig
 
-from inference.utils.spacy_extractor import SpacyAnchorExtractor, RequiredWordsChecker
+from inference.utils.spacy_extractor import SpacyAnchorExtractor
 from inference.utils.wiki_reader import WikipediaReader
 
 
@@ -38,12 +38,7 @@ class PromptBuilder:
     spacy: SpacyAnchorExtractor | None = None
     rng: random.Random = field(default_factory=random.Random)
 
-    checker: Optional[RequiredWordsChecker] = None
-
     def __post_init__(self) -> None:
-        if self.checker is None:
-            self.checker = RequiredWordsChecker(settings=self.config.required_words)
-
         if self.wiki is None:
             self.wiki = WikipediaReader(settings=self.config.wiki)
             try:
@@ -57,13 +52,6 @@ class PromptBuilder:
                 generic_nouns=set(x.lower() for x in self.config.generic_nouns),
                 extra_stopwords=set(x.lower() for x in self.config.extra_stopwords),
             )
-
-    # ------------------------------------------------------------------
-    # Validation helpers
-    # ------------------------------------------------------------------
-    def required_words_present(self, text: str, word1: str, word2: str) -> bool:
-        assert self.checker is not None
-        return self.checker.required_words_present(text, word1, word2)
 
     # ------------------------------------------------------------------
     # Wiki -> microcards

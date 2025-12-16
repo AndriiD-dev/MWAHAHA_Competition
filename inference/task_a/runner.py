@@ -14,6 +14,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from inference.utils.prompt_builder import PromptBuilder, normalize_one_line, safe_word
+from inference.utils.response_evaluator import ResponseEvaluator
 
 
 # =============================================================================
@@ -316,6 +317,7 @@ def copy_to_drive(zip_path: Path, drive_dir: str) -> None:
 class InferenceRunner:
     cfg: RunnerConfig
     builder: PromptBuilder = field(default_factory=PromptBuilder)
+    response_evaluator: ResponseEvaluator = field(default_factory=ResponseEvaluator)
 
     def _load_dataframe(self) -> pd.DataFrame:
         if self.cfg.task == "two_words":
@@ -354,9 +356,9 @@ class InferenceRunner:
             return False
 
         if self.cfg.task == "two_words":
-            return self.builder.required_words_present(out, df.loc[i, "word1"], df.loc[i, "word2"])
+            return self.response_evaluator.is_good(out, df.loc[i, "word1"], df.loc[i, "word2"])
 
-        return self.builder.required_words_present(out, df.loc[i, "noun1"], df.loc[i, "noun2"])
+        return self.response_evaluator.is_good(out, df.loc[i, "noun1"], df.loc[i, "noun2"])
 
     def _fallback_plan(self, df: pd.DataFrame, i: int) -> str:
         _ = (df, i)

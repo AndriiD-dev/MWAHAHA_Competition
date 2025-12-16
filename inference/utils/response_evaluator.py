@@ -14,7 +14,6 @@ import torch
 
 
 
-
 @dataclass
 class ResponseEvaluator:
     rng: random.Random = field(default_factory=random.Random)
@@ -28,9 +27,9 @@ class ResponseEvaluator:
         if self.checker is None:
             self.checker = RequiredWordsChecker(settings=self.config.required_words)
 
-        
         if self.classifier_tokenizer is None:
             self.classifier_tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+
         if self.classifier_model is None:    
             self.classifier_model = AutoModelForSequenceClassification.from_pretrained(self.CLASSIFIER_MODEL_ID)
 
@@ -40,7 +39,7 @@ class ResponseEvaluator:
         return self.checker.required_words_present(text, word1, word2)
     
     def is_humorous(self, text: str):
-        inputs = inputs = self.classifier_tokenizer(text, return_tensors="pt")
+        inputs = self.classifier_tokenizer(text, return_tensors="pt")
 
         with torch.no_grad():
             outputs = self.classifier_model(**inputs)
