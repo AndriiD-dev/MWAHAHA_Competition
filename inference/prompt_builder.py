@@ -24,7 +24,6 @@ def safe_word(word: str) -> str:
     """Trim whitespace only. Do not destroy internal casing."""
     return normalize_one_line(word).strip()
 
-
 @dataclass
 class PromptBuilder:
     """Single source of truth for prompt construction.
