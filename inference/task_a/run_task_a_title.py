@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import random
-import re
 import time
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
@@ -12,131 +10,27 @@ import torch
 import pandas as pd
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-import prompt_builder_title as pb
+from ..prompt_builder import PromptBuilder, normalize_one_line, safe_word
 
 
 # ---------------------------------------------------------------------------
-# Headline -> two nouns (anchors)
+# Single prompt builder (wiki + spaCy + config)
 # ---------------------------------------------------------------------------
 
-def _load_spacy_model():
-    try:
-        import spacy
-    except Exception as e:
-        raise RuntimeError(
-            "spaCy is required. Install it and download the model:\n"
-            "pip install spacy\n"
-            "python -m spacy download en_core_web_sm"
-        ) from e
-
-    try:
-        return spacy.load("en_core_web_sm")
-    except Exception as e:
-        raise RuntimeError(
-            "spaCy model en_core_web_sm is missing.\n"
-            "Run: python -m spacy download en_core_web_sm"
-        ) from e
-
-
-_NLP = None
-
-
-def choose_two_nouns_from_label(
-    gt_text_label: str,
-    *,
-    seed: int | None = None,
-    prefer_distinct: bool = True,
-) -> tuple[str, str]:
-    """
-    Takes text (headline) and returns exactly two noun lemmas.
-
-    Strategy:
-    1) Extract NOUN / PROPN lemmas using spaCy.
-    2) Remove trivial lemmas.
-    3) Prefer two distinct nouns. If not possible, duplicate the only one available.
-    4) If zero nouns, fall back to content words (adjectives/verbs) or finally random tokens.
-    """
-    global _NLP
-    if _NLP is None:
-        _NLP = _load_spacy_model()
-
-    rnd = random.Random(seed) if seed is not None else random
-
-    text = (gt_text_label or "").strip()
-    if not text:
-        return ("", "")
-
-    doc = _NLP(text)
-
-    nouns: List[str] = []
-    for t in doc:
-        if t.pos_ in {"NOUN", "PROPN"}:
-            lemma = t.lemma_.strip().lower()
-            if lemma and lemma.isalpha() and len(lemma) > 2:
-                nouns.append(lemma)
-
-    junk = {
-        "thing", "stuff", "something", "anything", "everything",
-        "someone", "anyone", "everyone",
-    }
-    nouns = [n for n in nouns if n not in junk]
-
-    if nouns:
-        if prefer_distinct:
-            unique = list(dict.fromkeys(nouns))
-            if len(unique) >= 2:
-                w1, w2 = rnd.sample(unique, 2)
-                return (w1, w2)
-            return (unique[0], unique[0])
-        else:
-            if len(nouns) >= 2:
-                return tuple(rnd.sample(nouns, 2))  # type: ignore
-            return (nouns[0], nouns[0])
-
-    content: List[str] = []
-    for t in doc:
-        if t.pos_ in {"ADJ", "VERB"}:
-            lemma = t.lemma_.strip().lower()
-            if lemma and lemma.isalpha() and len(lemma) > 2:
-                content.append(lemma)
-
-    if content:
-        unique = list(dict.fromkeys(content))
-        if len(unique) >= 2:
-            return tuple(rnd.sample(unique, 2))  # type: ignore
-        return (unique[0], unique[0])
-
-    tokens = [t.text.lower() for t in doc if t.text.isalpha() and len(t.text) > 2]
-    if len(tokens) >= 2:
-        return tuple(rnd.sample(tokens, 2))  # type: ignore
-    if len(tokens) == 1:
-        return (tokens[0], tokens[0])
-    return ("", "")
-
-
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "data"
-OUTPUT_DIR = PROJECT_ROOT / "outputs"
-
-print("Project root:", PROJECT_ROOT)
-print("Data dir    :", DATA_DIR)
-print("Output dir  :", OUTPUT_DIR)
+BUILDER = PromptBuilder()
 
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class InferenceConfig:
     base_model_id: str = "Qwen/Qwen2.5-3B-Instruct"
 
-    input_path: Path = DATA_DIR / "task-a-title.csv"
-    output_dir: Path = OUTPUT_DIR
+    input_path: Path = field(default_factory=lambda: BUILDER.config.paths.data_dir / "task-a-title.csv")
+    output_dir: Path = field(default_factory=lambda: BUILDER.config.paths.output_dir)
     output_filename: str = "task-a-title_predictions_base.tsv"
 
     # Deterministic noun selection
@@ -196,7 +90,8 @@ cfg = InferenceConfig()
 # Speed knobs
 # ---------------------------------------------------------------------------
 
-def configure_fast_kernels():
+
+def configure_fast_kernels() -> None:
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
@@ -209,6 +104,7 @@ def configure_fast_kernels():
 # ---------------------------------------------------------------------------
 # Model loading
 # ---------------------------------------------------------------------------
+
 
 def load_model_and_tokenizer():
     print("Loading tokenizer from base model:", cfg.base_model_id)
@@ -260,75 +156,24 @@ def load_model_and_tokenizer():
 # Validation + fallbacks
 # ---------------------------------------------------------------------------
 
-def _boundary_pattern(phrase: str) -> re.Pattern:
-    """
-    Match the anchor noun as a standalone token/phrase, case-insensitively,
-    and allow simple morphological variants:
-
-    - plural: s / es
-    - y -> ies
-    - optional possessive: 's or ’s (also after plural)
-
-    For acronyms / very short tokens (<= 3), keep strict (no plural expansion).
-    """
-    base = pb.safe_word(phrase)
-
-    if not base:
-        # Match nothing
-        return re.compile(r"a^")
-
-    base_l = base.lower()
-
-    # Heuristic: treat very short tokens as acronyms/initialisms -> strict form only
-    if len(base_l) <= 3 or not base_l.isalpha():
-        p = re.escape(base_l)
-        return re.compile(rf"(?<![A-Za-z0-9]){p}(?![A-Za-z0-9])", flags=re.IGNORECASE)
-
-    # Build plural/inflection pattern
-    if base_l.endswith("y") and len(base_l) > 3:
-        # company -> company / companies
-        stem = re.escape(base_l[:-1])
-        core = rf"{stem}(?:y|ies)"
-    else:
-        # default pluralization: word / words / wordes (rare but ok) / watches (via es)
-        core = re.escape(base_l) + r"(?:s|es)?"
-
-    # Optional possessive (straight or curly apostrophe)
-    core = core + r"(?:'s|’s)?"
-
-    return re.compile(rf"(?<![A-Za-z0-9]){core}(?![A-Za-z0-9])", flags=re.IGNORECASE)
-
-
 
 def anchor_nouns_present(text: str, noun1: str, noun2: str) -> bool:
-    t = pb.normalize_one_line(text)
-    if not t:
-        return False
-
-    n1 = pb.safe_word(noun1)
-    n2 = pb.safe_word(noun2)
-    if not n1 or not n2:
-        return False
-
-    p1 = _boundary_pattern(n1).search(t) is not None
-    p2 = _boundary_pattern(n2).search(t) is not None
-    return p1 and p2
-
+    return BUILDER.required_words_present(text, noun1, noun2)
 
 
 def fallback_plan() -> str:
-    return pb.normalize_one_line(
+    return normalize_one_line(
         '{"angle":"obvious headline irony","misdirection":"literal reading","word_placement":"use both nouns in the punchline","device":"reversal"}'
     )
 
 
 def fallback_joke(headline: str, noun1: str, noun2: str) -> str:
-    h = pb.normalize_one_line(headline)
-    n1 = pb.safe_word(noun1) or "news"
-    n2 = pb.safe_word(noun2) or "headline"
+    h = normalize_one_line(headline)
+    n1 = safe_word(noun1) or "news"
+    n2 = safe_word(noun2) or "headline"
     if not h:
-        return pb.normalize_one_line(f"My {n1} met a {n2}; somehow both still made the evening news.")
-    return pb.normalize_one_line(
+        return normalize_one_line(f"My {n1} met a {n2}; somehow both still made the evening news.")
+    return normalize_one_line(
         f"After '{h}', my {n1} hired a {n2} for public relations. It went exactly as well as you think."
     )
 
@@ -337,6 +182,7 @@ def fallback_joke(headline: str, noun1: str, noun2: str) -> str:
 # Chat template helper
 # ---------------------------------------------------------------------------
 
+
 def to_chat_text(tokenizer, messages: List[dict]) -> str:
     return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
@@ -344,6 +190,7 @@ def to_chat_text(tokenizer, messages: List[dict]) -> str:
 # ---------------------------------------------------------------------------
 # Batching
 # ---------------------------------------------------------------------------
+
 
 def batched(items: List[int], batch_size: int) -> Iterable[List[int]]:
     for i in range(0, len(items), batch_size):
@@ -357,6 +204,7 @@ def order_by_length(texts: List[str]) -> List[int]:
 # ---------------------------------------------------------------------------
 # Generation
 # ---------------------------------------------------------------------------
+
 
 @torch.inference_mode()
 def generate_batch_once(
@@ -376,8 +224,15 @@ def generate_batch_once(
     prompt_len = input_ids.shape[1]
 
     BAD_PHRASES = [
-        "assistant", "assistant:", "user", "user:", "system", "system:",
-        "assistant user", "<tool call>", "</tool call>",
+        "assistant",
+        "assistant:",
+        "user",
+        "user:",
+        "system",
+        "system:",
+        "assistant user",
+        "<tool call>",
+        "</tool call>",
     ]
     bad_words_ids = tokenizer(BAD_PHRASES, add_special_tokens=False).input_ids
 
@@ -397,7 +252,7 @@ def generate_batch_once(
 
     new_tokens = gen_ids[:, prompt_len:]
     decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-    return [pb.normalize_one_line(x) for x in decoded]
+    return [normalize_one_line(x) for x in decoded]
 
 
 def generate_all(
@@ -449,7 +304,7 @@ def generate_headline_predictions_with_plans(
 
     # Pass 1: plans for all
     plan_texts = [
-        to_chat_text(tokenizer, pb.build_plan_messages(headlines[i], noun1_list[i], noun2_list[i]))
+        to_chat_text(tokenizer, BUILDER.build_title_plan_messages(headlines[i], noun1_list[i], noun2_list[i]))
         for i in range(n)
     ]
     plans = generate_all(
@@ -463,11 +318,11 @@ def generate_headline_predictions_with_plans(
         min_new_tokens=cfg.plan_min_new_tokens,
         label="PLAN",
     )
-    plans = [p if pb.normalize_one_line(p) else fallback_plan() for p in plans]
+    plans = [p if normalize_one_line(p) else fallback_plan() for p in plans]
 
     # Pass 2: final jokes for all
     final_texts = [
-        to_chat_text(tokenizer, pb.build_final_messages(headlines[i], noun1_list[i], noun2_list[i], plans[i]))
+        to_chat_text(tokenizer, BUILDER.build_title_final_messages(headlines[i], noun1_list[i], noun2_list[i], plans[i]))
         for i in range(n)
     ]
     outputs = generate_all(
@@ -484,7 +339,7 @@ def generate_headline_predictions_with_plans(
 
     def is_good(i: int) -> bool:
         t = outputs[i]
-        if pb.normalize_one_line(t) == "":
+        if normalize_one_line(t) == "":
             return False
         return anchor_nouns_present(t, noun1_list[i], noun2_list[i])
 
@@ -496,7 +351,7 @@ def generate_headline_predictions_with_plans(
         "Output only the joke."
     )
 
-    # Retry final, but redo planning every cfg.replan_every retries for the remaining failures
+    # Retry final, but redo planning every cfg.replan_every retries for remaining failures
     for retry_round, (temp, tp, mx) in enumerate(cfg.retry_settings[: cfg.max_retries], start=1):
         if not bad_indices:
             break
@@ -506,9 +361,9 @@ def generate_headline_predictions_with_plans(
         # Retry FINAL for current failures
         retry_texts = []
         for i in bad_indices:
-            msgs = pb.build_final_messages(headlines[i], noun1_list[i], noun2_list[i], plans[i])
+            msgs = BUILDER.build_title_final_messages(headlines[i], noun1_list[i], noun2_list[i], plans[i])
             msgs = [dict(msgs[0]), dict(msgs[1])]
-            msgs[1]["content"] = pb.normalize_one_line(msgs[1]["content"] + "\n" + strict_suffix)
+            msgs[1]["content"] = normalize_one_line(msgs[1]["content"] + "\n" + strict_suffix)
             retry_texts.append(to_chat_text(tokenizer, msgs))
 
         retry_out = generate_all(
@@ -525,7 +380,7 @@ def generate_headline_predictions_with_plans(
 
         new_bad: List[int] = []
         for pos, i in enumerate(bad_indices):
-            candidate = pb.normalize_one_line(retry_out[pos])
+            candidate = normalize_one_line(retry_out[pos])
             if candidate and anchor_nouns_present(candidate, noun1_list[i], noun2_list[i]):
                 outputs[i] = candidate
             else:
@@ -542,7 +397,7 @@ def generate_headline_predictions_with_plans(
             print(f"\nReplanning for remaining failures (every {cfg.replan_every} retries): {len(bad_indices)}")
 
             replan_texts = [
-                to_chat_text(tokenizer, pb.build_plan_messages(headlines[i], noun1_list[i], noun2_list[i]))
+                to_chat_text(tokenizer, BUILDER.build_title_plan_messages(headlines[i], noun1_list[i], noun2_list[i]))
                 for i in bad_indices
             ]
             replan_out = generate_all(
@@ -558,16 +413,16 @@ def generate_headline_predictions_with_plans(
             )
 
             for pos, i in enumerate(bad_indices):
-                plan_candidate = pb.normalize_one_line(replan_out[pos])
+                plan_candidate = normalize_one_line(replan_out[pos])
                 plans[i] = plan_candidate if plan_candidate else fallback_plan()
 
             print("\nImmediate FINAL retry after replanning")
 
             retry_texts_2 = []
             for i in bad_indices:
-                msgs = pb.build_final_messages(headlines[i], noun1_list[i], noun2_list[i], plans[i])
+                msgs = BUILDER.build_title_final_messages(headlines[i], noun1_list[i], noun2_list[i], plans[i])
                 msgs = [dict(msgs[0]), dict(msgs[1])]
-                msgs[1]["content"] = pb.normalize_one_line(msgs[1]["content"] + "\n" + strict_suffix)
+                msgs[1]["content"] = normalize_one_line(msgs[1]["content"] + "\n" + strict_suffix)
                 retry_texts_2.append(to_chat_text(tokenizer, msgs))
 
             retry_out_2 = generate_all(
@@ -584,7 +439,7 @@ def generate_headline_predictions_with_plans(
 
             new_bad_2: List[int] = []
             for pos, i in enumerate(bad_indices):
-                candidate = pb.normalize_one_line(retry_out_2[pos])
+                candidate = normalize_one_line(retry_out_2[pos])
                 if candidate and anchor_nouns_present(candidate, noun1_list[i], noun2_list[i]):
                     outputs[i] = candidate
                 else:
@@ -600,8 +455,9 @@ def generate_headline_predictions_with_plans(
             outputs[i] = fallback_joke(headlines[i], noun1_list[i], noun2_list[i])
 
     still_bad = [
-        i for i in range(n)
-        if pb.normalize_one_line(outputs[i]) == "" or not anchor_nouns_present(outputs[i], noun1_list[i], noun2_list[i])
+        i
+        for i in range(n)
+        if normalize_one_line(outputs[i]) == "" or not anchor_nouns_present(outputs[i], noun1_list[i], noun2_list[i])
     ]
     if still_bad:
         raise RuntimeError(f"Validation failed for indices: {still_bad[:20]}")
@@ -613,6 +469,7 @@ def generate_headline_predictions_with_plans(
 # ---------------------------------------------------------------------------
 # I/O helpers
 # ---------------------------------------------------------------------------
+
 
 def save_and_zip(df_out: pd.DataFrame, output_dir: Path, filename: str) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -630,7 +487,7 @@ def save_and_zip(df_out: pd.DataFrame, output_dir: Path, filename: str) -> Path:
     return zip_path
 
 
-def copy_to_drive(zip_path: Path, drive_dir: str):
+def copy_to_drive(zip_path: Path, drive_dir: str) -> None:
     try:
         from google.colab import drive as colab_drive  # noqa: F401
     except Exception:
@@ -650,6 +507,7 @@ def copy_to_drive(zip_path: Path, drive_dir: str):
     dest_path = dest_dir / zip_path.name
 
     import shutil
+
     shutil.copy2(zip_path, dest_path)
     print("Copied zip to Google Drive:", dest_path)
 
@@ -658,11 +516,16 @@ def copy_to_drive(zip_path: Path, drive_dir: str):
 # Main
 # ---------------------------------------------------------------------------
 
-def main():
+
+def main() -> None:
     configure_fast_kernels()
 
+    print("Project root:", BUILDER.config.paths.project_root)
+    print("Data dir    :", BUILDER.config.paths.data_dir)
+    print("Output dir  :", BUILDER.config.paths.output_dir)
+
     print("Loading data from:", cfg.input_path)
-    # Your earlier scripts used a tab separator for this file
+    # Task A title files use tab separator
     df = pd.read_csv(cfg.input_path, sep="\t", keep_default_na=False)
 
     if "headline" not in df.columns:
@@ -676,7 +539,7 @@ def main():
     noun2_list: List[str] = []
     for i, h in enumerate(headlines):
         seed = cfg.noun_seed_base + i
-        n1, n2 = choose_two_nouns_from_label(h, seed=seed, prefer_distinct=True)
+        n1, n2 = BUILDER.choose_two_nouns_from_headline(h, seed=seed, prefer_distinct=True)
         noun1_list.append(n1)
         noun2_list.append(n2)
 
@@ -699,12 +562,14 @@ def main():
 
     df_out["prediction"] = predictions
 
-    empty_count = (df_out["prediction"].astype(str).map(pb.normalize_one_line) == "").sum()
+    empty_count = (df_out["prediction"].astype(str).map(normalize_one_line) == "").sum()
     if empty_count != 0:
         raise RuntimeError(f"Requirement failed: {empty_count} empty predictions")
 
     zip_path = save_and_zip(df_out, cfg.output_dir, cfg.output_filename)
     copy_to_drive(zip_path, cfg.drive_output_dir)
+
+    BUILDER.save_wiki_cache()
 
     print("All done.")
 

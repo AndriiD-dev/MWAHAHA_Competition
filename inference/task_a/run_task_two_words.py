@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import re
 import time
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
@@ -11,32 +10,27 @@ import torch
 import pandas as pd
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-import prompt_builder_two_words as pb
+from ..prompt_builder import PromptBuilder, normalize_one_line, safe_word
 
 
 # ---------------------------------------------------------------------------
-# Paths
+# Single prompt builder (wiki + spaCy + config)
 # ---------------------------------------------------------------------------
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "data"
-OUTPUT_DIR = PROJECT_ROOT / "outputs"
-
-print("Project root:", PROJECT_ROOT)
-print("Data dir    :", DATA_DIR)
-print("Output dir  :", OUTPUT_DIR)
+BUILDER = PromptBuilder()
 
 
 # ---------------------------------------------------------------------------
-# Config
+# Inference config
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class InferenceConfig:
     base_model_id: str = "Qwen/Qwen2.5-3B-Instruct"
 
-    input_path: Path = DATA_DIR / "task-a-two-words.csv"
-    output_dir: Path = OUTPUT_DIR
+    input_path: Path = field(default_factory=lambda: BUILDER.config.paths.data_dir / "task-a-two-words.csv")
+    output_dir: Path = field(default_factory=lambda: BUILDER.config.paths.output_dir)
     output_filename: str = "task-a-two-words_predictions_base.tsv"
 
     # Plan decoding (pass 1)
@@ -75,7 +69,8 @@ cfg = InferenceConfig()
 # Speed knobs
 # ---------------------------------------------------------------------------
 
-def configure_fast_kernels():
+
+def configure_fast_kernels() -> None:
     if torch.cuda.is_available():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
@@ -88,6 +83,7 @@ def configure_fast_kernels():
 # ---------------------------------------------------------------------------
 # Model loading
 # ---------------------------------------------------------------------------
+
 
 def load_model_and_tokenizer():
     print("Loading tokenizer from base model:", cfg.base_model_id)
@@ -130,7 +126,9 @@ def load_model_and_tokenizer():
             model = None
 
     if model is None:
-        raise RuntimeError(f"Failed to load model with any attention implementation. Last error: {last_err}")
+        raise RuntimeError(
+            f"Failed to load model with any attention implementation. Last error: {last_err}"
+        )
 
     model.eval()
     model.generation_config.pad_token_id = tokenizer.pad_token_id
@@ -144,81 +142,34 @@ def load_model_and_tokenizer():
 # Validation + fallbacks
 # ---------------------------------------------------------------------------
 
-def _boundary_pattern(phrase: str) -> re.Pattern:
-    """
-    Match the anchor noun as a standalone token/phrase, case-insensitively,
-    and allow simple morphological variants:
-
-    - plural: s / es
-    - y -> ies
-    - optional possessive: 's or ’s (also after plural)
-
-    For acronyms / very short tokens (<= 3), keep strict (no plural expansion).
-    """
-    base = pb.safe_word(phrase)
-
-    if not base:
-        # Match nothing
-        return re.compile(r"a^")
-
-    base_l = base.lower()
-
-    # Heuristic: treat very short tokens as acronyms/initialisms -> strict form only
-    if len(base_l) <= 3 or not base_l.isalpha():
-        p = re.escape(base_l)
-        return re.compile(rf"(?<![A-Za-z0-9]){p}(?![A-Za-z0-9])", flags=re.IGNORECASE)
-
-    # Build plural/inflection pattern
-    if base_l.endswith("y") and len(base_l) > 3:
-        # company -> company / companies
-        stem = re.escape(base_l[:-1])
-        core = rf"{stem}(?:y|ies)"
-    else:
-        # default pluralization: word / words / wordes (rare but ok) / watches (via es)
-        core = re.escape(base_l) + r"(?:s|es)?"
-
-    # Optional possessive (straight or curly apostrophe)
-    core = core + r"(?:'s|’s)?"
-
-    return re.compile(rf"(?<![A-Za-z0-9]){core}(?![A-Za-z0-9])", flags=re.IGNORECASE)
-
 
 def required_words_present(text: str, word1: str, word2: str) -> bool:
-    t = pb.normalize_one_line(text)
-    if not t:
-        return False
-
-    w1 = pb.safe_word(word1)
-    w2 = pb.safe_word(word2)
-    if not w1 or not w2:
-        return False
-
-    p1 = _boundary_pattern(w1).search(t) is not None
-    p2 = _boundary_pattern(w2).search(t) is not None
-    return p1 and p2
+    return BUILDER.required_words_present(text, word1, word2)
 
 
 def fallback_plan(word1: str, word2: str) -> str:
     # A minimal plan if the plan generation comes back empty.
-    return pb.normalize_one_line(
+    _ = (word1, word2)
+    return normalize_one_line(
         '{"scenario":"everyday misunderstanding","misdirection":"take it literally","word_placement":"use both words in the punchline","device":"reversal"}'
     )
 
 
 def fallback_joke(word1: str, word2: str) -> str:
-    w1 = pb.safe_word(word1)
-    w2 = pb.safe_word(word2)
-    return pb.normalize_one_line(
+    w1 = safe_word(word1)
+    w2 = safe_word(word2)
+    return normalize_one_line(
         f"I brought a {w1} to a {w2} meeting; both were unqualified, but somehow still got promoted."
     )
 
 
 # ---------------------------------------------------------------------------
-# Prompt building (delegated to prompt_builder_two_words.py)
+# Prompt building (delegated to PromptBuilder)
 # ---------------------------------------------------------------------------
 
+
 def build_plan_chat_text(tokenizer, word1: str, word2: str) -> str:
-    messages = pb.build_plan_messages(word1, word2)
+    messages = BUILDER.build_two_words_plan_messages(word1, word2)
     return tokenizer.apply_chat_template(
         messages,
         tokenize=False,
@@ -226,11 +177,17 @@ def build_plan_chat_text(tokenizer, word1: str, word2: str) -> str:
     )
 
 
-def build_final_chat_text(tokenizer, word1: str, word2: str, plan_text: str, strict_suffix: str = "") -> str:
-    messages = pb.build_final_messages(word1, word2, plan_text)
+def build_final_chat_text(
+    tokenizer,
+    word1: str,
+    word2: str,
+    plan_text: str,
+    strict_suffix: str = "",
+) -> str:
+    messages = BUILDER.build_two_words_final_messages(word1, word2, plan_text)
     if strict_suffix:
         messages = [dict(messages[0]), dict(messages[1])]
-        messages[1]["content"] = pb.normalize_one_line(messages[1]["content"] + "\n" + strict_suffix)
+        messages[1]["content"] = normalize_one_line(messages[1]["content"] + "\n" + strict_suffix)
 
     return tokenizer.apply_chat_template(
         messages,
@@ -243,9 +200,10 @@ def build_final_chat_text(tokenizer, word1: str, word2: str, plan_text: str, str
 # Batching helpers
 # ---------------------------------------------------------------------------
 
+
 def batched(items: List[int], batch_size: int) -> Iterable[List[int]]:
     for i in range(0, len(items), batch_size):
-        yield items[i: i + batch_size]
+        yield items[i : i + batch_size]
 
 
 def order_by_length(texts: List[str]) -> List[int]:
@@ -255,6 +213,7 @@ def order_by_length(texts: List[str]) -> List[int]:
 # ---------------------------------------------------------------------------
 # Generation core
 # ---------------------------------------------------------------------------
+
 
 @torch.inference_mode()
 def generate_batch_once(
@@ -280,11 +239,18 @@ def generate_batch_once(
     prompt_len = input_ids.shape[1]
 
     # Block common chat markers / role-like strings
-    BAD_PHRASES = [
-        "assistant", "assistant:", "user", "user:", "system", "system:",
-        "assistant user", "<tool call>", "</tool call>",
+    bad_phrases = [
+        "assistant",
+        "assistant:",
+        "user",
+        "user:",
+        "system",
+        "system:",
+        "assistant user",
+        "<tool call>",
+        "</tool call>",
     ]
-    bad_words_ids = tokenizer(BAD_PHRASES, add_special_tokens=False).input_ids
+    bad_words_ids = tokenizer(bad_phrases, add_special_tokens=False).input_ids
 
     gen_ids = model.generate(
         input_ids=input_ids,
@@ -302,7 +268,7 @@ def generate_batch_once(
 
     new_tokens = gen_ids[:, prompt_len:]
     decoded = tokenizer.batch_decode(new_tokens, skip_special_tokens=True)
-    return [pb.normalize_one_line(x) for x in decoded]
+    return [normalize_one_line(x) for x in decoded]
 
 
 def generate_all(
@@ -341,8 +307,9 @@ def generate_all(
 
 
 # ---------------------------------------------------------------------------
-# Two-pass (Option 2A): plan for all -> final for all
+# Two-pass (plan for all -> final for all)
 # ---------------------------------------------------------------------------
+
 
 @torch.inference_mode()
 def generate_word_inclusion_predictions_with_plans(
@@ -368,7 +335,7 @@ def generate_word_inclusion_predictions_with_plans(
         min_new_tokens=cfg.plan_min_new_tokens,
         label="PLAN",
     )
-    plans = [p if pb.normalize_one_line(p) else fallback_plan(word1_list[i], word2_list[i]) for i, p in enumerate(plans)]
+    plans = [p if normalize_one_line(p) else fallback_plan(word1_list[i], word2_list[i]) for i, p in enumerate(plans)]
 
     # Pass 2: finals
     final_texts = [build_final_chat_text(tokenizer, word1_list[i], word2_list[i], plans[i]) for i in range(n)]
@@ -386,7 +353,7 @@ def generate_word_inclusion_predictions_with_plans(
 
     def is_good(i: int) -> bool:
         t = outputs[i]
-        if pb.normalize_one_line(t) == "":
+        if normalize_one_line(t) == "":
             return False
         return required_words_present(t, word1_list[i], word2_list[i])
 
@@ -394,7 +361,7 @@ def generate_word_inclusion_predictions_with_plans(
     print(f"\nInitial final failures (empty or missing required words): {len(bad_indices)}")
 
     strict_suffix = (
-        "IMPORTANT: The joke is INVALID unless it includes BOTH required words exactly as written. "
+        "IMPORTANT: The joke is INVALID unless it includes BOTH required words naturally. "
         "Output only the joke."
     )
 
@@ -423,7 +390,7 @@ def generate_word_inclusion_predictions_with_plans(
 
         new_bad: List[int] = []
         for pos, i in enumerate(bad_indices):
-            candidate = pb.normalize_one_line(retry_out[pos])
+            candidate = normalize_one_line(retry_out[pos])
             if candidate and required_words_present(candidate, word1_list[i], word2_list[i]):
                 outputs[i] = candidate
             else:
@@ -439,8 +406,9 @@ def generate_word_inclusion_predictions_with_plans(
             outputs[i] = fallback_joke(word1_list[i], word2_list[i])
 
     still_bad = [
-        i for i in range(n)
-        if pb.normalize_one_line(outputs[i]) == "" or not required_words_present(outputs[i], word1_list[i], word2_list[i])
+        i
+        for i in range(n)
+        if normalize_one_line(outputs[i]) == "" or not required_words_present(outputs[i], word1_list[i], word2_list[i])
     ]
     if still_bad:
         raise RuntimeError(f"Validation failed for indices: {still_bad[:20]}")
@@ -452,6 +420,7 @@ def generate_word_inclusion_predictions_with_plans(
 # ---------------------------------------------------------------------------
 # I/O helpers
 # ---------------------------------------------------------------------------
+
 
 def save_and_zip(df_out: pd.DataFrame, output_dir: Path, filename: str) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -469,7 +438,7 @@ def save_and_zip(df_out: pd.DataFrame, output_dir: Path, filename: str) -> Path:
     return zip_path
 
 
-def copy_to_drive(zip_path: Path, drive_dir: str):
+def copy_to_drive(zip_path: Path, drive_dir: str) -> None:
     try:
         from google.colab import drive as colab_drive  # noqa: F401
     except ImportError:
@@ -489,6 +458,7 @@ def copy_to_drive(zip_path: Path, drive_dir: str):
     dest_path = dest_dir / zip_path.name
 
     import shutil
+
     shutil.copy2(zip_path, dest_path)
     print("Copied zip to Google Drive:", dest_path)
 
@@ -497,8 +467,13 @@ def copy_to_drive(zip_path: Path, drive_dir: str):
 # Main
 # ---------------------------------------------------------------------------
 
-def main():
+
+def main() -> None:
     configure_fast_kernels()
+
+    print("Project root:", BUILDER.config.paths.project_root)
+    print("Data dir    :", BUILDER.config.paths.data_dir)
+    print("Output dir  :", BUILDER.config.paths.output_dir)
 
     print("Loading data from:", cfg.input_path)
     df = pd.read_csv(cfg.input_path, sep="\t", keep_default_na=False)
@@ -529,7 +504,7 @@ def main():
     df_out["prediction"] = predictions
 
     # Final validation
-    empty_count = (df_out["prediction"].astype(str).map(pb.normalize_one_line) == "").sum()
+    empty_count = (df_out["prediction"].astype(str).map(normalize_one_line) == "").sum()
     if empty_count != 0:
         raise RuntimeError(f"Requirement failed: {empty_count} empty predictions")
 
@@ -542,6 +517,9 @@ def main():
 
     zip_path = save_and_zip(df_out, cfg.output_dir, cfg.output_filename)
     copy_to_drive(zip_path, cfg.drive_output_dir)
+
+    # Persist wiki cache (best-effort)
+    BUILDER.save_wiki_cache()
 
     print("All done.")
 
