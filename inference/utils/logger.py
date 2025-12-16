@@ -36,7 +36,7 @@ def _truncate_value(v: Any, max_chars: int, max_list_items: int) -> Any:
 
 
 @dataclass
-class StructuredLogger:
+class Logger:
     enabled: bool = True
     max_chars: int = 900
     max_list_items: int = 12

@@ -15,7 +15,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from inference.utils.prompt_builder import PromptBuilder, normalize_one_line, safe_word
 from inference.utils.response_evaluator import ResponseEvaluator
-from inference.utils.structured_logger import StructuredLogger
+from inference.utils.logger import Logger
 
 
 # =============================================================================
@@ -191,7 +191,7 @@ def generate_all(
     decode: DecodeConfig,
     label: str,
     *,
-    logger: Optional[StructuredLogger] = None,
+    logger: Optional[Logger] = None,
     metas: Optional[List[Dict[str, Any]]] = None,
     eval_fn: Optional[Callable[[str, Optional[Dict[str, Any]]], Optional[Dict[str, Any]]]] = None,
     note: Optional[str] = None,
