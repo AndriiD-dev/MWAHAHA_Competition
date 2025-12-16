@@ -33,7 +33,7 @@ class PromptBuilder:
     - centralizes normalization and required-word validation
     """
 
-    config: PromptBuilderConfig = PromptBuilderConfig
+    config: PromptBuilderConfig = field(default_factory=PromptBuilderConfig)
     wiki: WikipediaReader | None = None
     spacy: SpacyAnchorExtractor | None = None
     rng: random.Random = field(default_factory=random.Random)

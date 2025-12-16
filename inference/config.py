@@ -226,3 +226,5 @@ class PromptBuilderConfig:
         "yeah", "okay", "ok", "lol",
     })
 
+DEFAULT_CONFIG = PromptBuilderConfig()
+
