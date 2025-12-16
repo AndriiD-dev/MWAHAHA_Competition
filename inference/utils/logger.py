@@ -232,3 +232,13 @@ class Logger:
                 "summary": summary,
             }
         )
+
+    def log_fallback_predictions(self, items: List[Dict[str, Any]]) -> None:
+        self._write_json_block(
+            {
+                "type": "fallback_predictions",
+                "time_iso": _now_iso(),
+                "count": len(items),
+                "items": items,
+            }
+        )

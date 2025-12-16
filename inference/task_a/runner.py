@@ -684,6 +684,25 @@ class InferenceRunner:
 
             logger.log_failed_jokes(failed_items)
 
+            fallback_items: List[Dict[str, Any]] = []
+            for i in sorted(fallback_used):
+                meta = metas[i]
+                anchors = meta.get("anchors") or {}
+                fallback_items.append(
+                    {
+                        "index": i,
+                        "anchors": anchors,
+                        "headline": meta.get("headline"),
+                        "plan": meta.get("plan"),
+                        "last_model_output_before_fallback": pre_fallback_outputs[i] if i < len(
+                            pre_fallback_outputs) else "",
+                        "fallback_prediction": outputs[i],
+                        "reason": "still_failed_after_retries",
+                    }
+                )
+
+            logger.log_fallback_predictions(fallback_items)
+
             elapsed = time.time() - start_all
             logger.log_run_end(
                 {
