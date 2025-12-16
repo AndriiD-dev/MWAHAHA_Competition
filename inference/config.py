@@ -225,6 +225,3 @@ class PromptBuilderConfig:
     extra_stopwords: FrozenSet[str] = frozenset({
         "yeah", "okay", "ok", "lol",
     })
-
-DEFAULT_CONFIG = PromptBuilderConfig()
-

@@ -5,7 +5,7 @@ import importlib.util
 import json
 import time
 import zipfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
@@ -315,7 +315,7 @@ def copy_to_drive(zip_path: Path, drive_dir: str) -> None:
 @dataclass
 class InferenceRunner:
     cfg: RunnerConfig
-    builder: PromptBuilder = PromptBuilder()
+    builder: PromptBuilder = field(default_factory=PromptBuilder)
 
     def _load_dataframe(self) -> pd.DataFrame:
         if self.cfg.task == "two_words":

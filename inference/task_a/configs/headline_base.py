@@ -8,7 +8,7 @@ RUNNER_CONFIG = RunnerConfig(
     output_dir=Path("outputs"),
     output_filename="task-a-title_predictions_base.tsv",
     batch_size=16,
-    noun_seed_base=1337,
+    noun_seed_base=42,
     replan_every=5,
     plan_decode=DecodeConfig(max_new_tokens=80, min_new_tokens=16, temperature=0.4, top_p=0.9),
     final_decode=DecodeConfig(max_new_tokens=32, min_new_tokens=6, temperature=0.8, top_p=0.95),
