@@ -1,55 +1,65 @@
 from __future__ import annotations
 
 import random
-import re
-
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import ClassVar, Optional
 
-from inference.utils.spacy_extractor import RequiredWordsChecker
-from inference.config import ResponseEvaluatorConfig
-
-from transformers import RobertaTokenizerFast, AutoModelForSequenceClassification
 import torch
+from transformers import AutoModelForSequenceClassification, RobertaTokenizerFast
 
+from inference.config import ResponseEvaluatorConfig
+from inference.utils.spacy_extractor import RequiredWordsChecker
 
 
 @dataclass
 class ResponseEvaluator:
     rng: random.Random = field(default_factory=random.Random)
-    config: ResponseEvaluatorConfig = ResponseEvaluatorConfig
+
+    # IMPORTANT: must be an INSTANCE, not the class
+    config: ResponseEvaluatorConfig = field(default_factory=ResponseEvaluatorConfig)
+
     checker: Optional[RequiredWordsChecker] = None
-    CLASSIFIER_MODEL_ID = "Humor-Research/humor-detection-comb-23"
-    classifier_model = None
-    classifier_tokenizer = None
+
+    CLASSIFIER_MODEL_ID: ClassVar[str] = "Humor-Research/humor-detection-comb-23"
+    classifier_model: ClassVar[Optional[AutoModelForSequenceClassification]] = None
+    classifier_tokenizer: ClassVar[Optional[RobertaTokenizerFast]] = None
 
     def __post_init__(self) -> None:
         if self.checker is None:
             self.checker = RequiredWordsChecker(settings=self.config.required_words)
 
-        if self.classifier_tokenizer is None:
-            self.classifier_tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
+        if self.__class__.classifier_tokenizer is None:
+            self.__class__.classifier_tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
 
-        if self.classifier_model is None:    
-            self.classifier_model = AutoModelForSequenceClassification.from_pretrained(self.CLASSIFIER_MODEL_ID)
+        if self.__class__.classifier_model is None:
+            model = AutoModelForSequenceClassification.from_pretrained(self.CLASSIFIER_MODEL_ID)
+            model.eval()
+            if torch.cuda.is_available():
+                model.to("cuda")
+            self.__class__.classifier_model = model
 
-        
     def required_words_present(self, text: str, word1: str, word2: str) -> bool:
         assert self.checker is not None
         return self.checker.required_words_present(text, word1, word2)
-    
-    def is_humorous(self, text: str):
-        inputs = self.classifier_tokenizer(text, return_tensors="pt")
+
+    def is_humorous(self, text: str) -> bool:
+        assert self.__class__.classifier_tokenizer is not None
+        assert self.__class__.classifier_model is not None
+
+        tokenizer = self.__class__.classifier_tokenizer
+        model = self.__class__.classifier_model
+
+        inputs = tokenizer(text, return_tensors="pt", truncation=True)
+        if next(model.parameters()).is_cuda:
+            inputs = {k: v.to("cuda") for k, v in inputs.items()}
 
         with torch.no_grad():
-            outputs = self.classifier_model(**inputs)
-        print(outputs)
+            outputs = model(**inputs)
+
         logits = outputs.logits  # shape [1, 2]
         probs = torch.softmax(logits, dim=-1).squeeze()
-        # Assuming label 1 = humorous, 0 = non-humorous (you can swap if needed)
         _, p_humor = probs.tolist()
-        return True if p_humor > 0.5 else False
-    
+        return p_humor > 0.5
+
     def is_good(self, text: str, word1: str, word2: str) -> bool:
         return self.required_words_present(text, word1, word2) and self.is_humorous(text)
-        
