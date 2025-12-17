@@ -118,6 +118,12 @@ class RequiredWordsSettings:
     allow_plural_ies: bool = True
     allow_possessive: bool = True  # 's, ’s, s', s’
 
+    # Weaker matching options
+    allow_singular_from_plural: bool = True   # "eggs" anchor will also accept "egg"
+    allow_verb_ed: bool = True                # "spray" anchor will also accept "sprayed"
+    allow_verb_ing: bool = True               # "spray" anchor will also accept "spraying"
+
+
 
 # =============================================================================
 # Prompt text (unchanged; kept here for single source of truth)

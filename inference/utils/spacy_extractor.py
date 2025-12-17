@@ -238,14 +238,77 @@ class RequiredWordsChecker:
         full = rf"{self.settings.boundary_left}{head_pat}{last_pat}{self.settings.boundary_right}"
         return re.compile(full, flags=re.IGNORECASE)
 
+    # ---------------------------
+    # Helpers for weak variants
+    # ---------------------------
+
+    def _ed_variant(self, base: str) -> str:
+        # spray -> sprayed, bake -> baked
+        if base.endswith("e"):
+            return base + "d"
+        if base.endswith("y") and len(base) > 2 and base[-2] not in "aeiou":
+            # try -> tried
+            return base[:-1] + "ied"
+        return base + "ed"
+
+    def _ing_variant(self, base: str) -> str:
+        # spray -> spraying, bake -> baking
+        if base.endswith("e") and len(base) > 2 and not base.endswith("ee"):
+            return base[:-1] + "ing"
+        return base + "ing"
+
+    def _singular_variants(self, base: str) -> List[str]:
+        # eggs -> egg, stories -> story, boxes -> box
+        out: List[str] = []
+        if not self.settings.allow_singular_from_plural:
+            return out
+
+        if base.endswith("ies") and len(base) > 4:
+            out.append(base[:-3] + "y")
+        elif base.endswith("es") and len(base) > 3:
+            out.append(base[:-2])
+        elif base.endswith("s") and len(base) > 3 and not base.endswith("ss"):
+            out.append(base[:-1])
+        return out
+
+    def _phrase_variants(self, phrase: str) -> List[str]:
+        p = self.safe_phrase_preserve_case(phrase)
+        if not p:
+            return []
+
+        parts = p.split()
+        if not parts:
+            return []
+
+        head = " ".join(parts[:-1])
+        last = parts[-1].lower()
+
+        last_variants = {last}
+
+        # Allow singular form when anchor is plural (eggs -> egg)
+        for s in self._singular_variants(last):
+            last_variants.add(s)
+
+        # Allow simple verb-like variants (spray -> sprayed/spraying)
+        if self.settings.allow_verb_ed and last.isalpha():
+            last_variants.add(self._ed_variant(last))
+        if self.settings.allow_verb_ing and last.isalpha():
+            last_variants.add(self._ing_variant(last))
+
+        # Rebuild phrases
+        if head:
+            return [f"{head} {v}" for v in sorted(last_variants)]
+        return sorted(last_variants)
+
     def required_words_present(self, text: str, word1: str, word2: str) -> bool:
         t = self.normalize_one_line(text)
         if not t:
             return False
 
-        w1 = self.safe_phrase_preserve_case(word1)
-        w2 = self.safe_phrase_preserve_case(word2)
-        if not w1 or not w2:
+        def present(anchor: str) -> bool:
+            for v in self._phrase_variants(anchor):
+                if self.boundary_pattern(v).search(t) is not None:
+                    return True
             return False
 
-        return (self.boundary_pattern(w1).search(t) is not None) and (self.boundary_pattern(w2).search(t) is not None)
+        return present(word1) and present(word2)
