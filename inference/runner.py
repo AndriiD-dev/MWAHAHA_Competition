@@ -389,11 +389,6 @@ class InferenceRunner:
             df["headline"] = df["headline"].fillna("").astype(str)
 
             print("Preparing nouns for each headline (spaCy noun extraction)...")
-            # Force spaCy model load once so the first extraction does not look like a freeze.
-            try:
-                self.builder._ensure_models()  # noqa: SLF001
-            except Exception:
-                pass
 
             noun1_list: List[str] = []
             noun2_list: List[str] = []
@@ -403,7 +398,7 @@ class InferenceRunner:
             for i in range(n):
                 headline = df.loc[i, "headline"]
                 seed = int(self.cfg.noun_seed_base + i)
-                n1, n2 = self.builder.extract_title_nouns(headline, seed=seed)
+                n1, n2 = self.builder.choose_two_nouns_from_headline(headline, seed=seed)
                 noun1_list.append(n1)
                 noun2_list.append(n2)
 
