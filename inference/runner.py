@@ -805,8 +805,6 @@ class InferenceRunner:
         # Copy to Drive (zip + log)
         copy_outputs_to_drive([zip_path, log_path], self.cfg.drive_output_dir)
 
-        print(f"\nSaving predictions to: {out_path}")
-        print(f"Zipping to: {zip_path}")
         print("Done.")
 
 
