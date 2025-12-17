@@ -735,12 +735,15 @@ class InferenceRunner:
         # ---------------------------------------------------------------------
         # Save predictions
         # ---------------------------------------------------------------------
-        out_rows: List[Tuple[str, str]] = []
-        for i in range(n):
-            out_id = str(df.loc[i, "id"]) if "id" in df.columns else str(i)
-            out_rows.append((out_id, outputs[i]))
-        out_df = pd.DataFrame(out_rows, columns=["id", "joke"])
-        out_df.to_csv(out_path, sep="\t", index=False)
+        out_df = df.copy()
+
+        # Ensure there is an id column
+        if "id" not in out_df.columns:
+            out_df.insert(0, "id", [str(i) for i in range(len(out_df))])
+
+
+        out_df["prediction"] = outputs
+
 
         zip_path = zip_file(out_path)
 
