@@ -6,6 +6,7 @@ RUNNER_CONFIG = {
     "input_path": Path("data/task-a-title.csv"),
     "output_dir": Path("outputs"),
     "output_filename": "task-a-title_predictions_base.tsv",
+    "drive_output_dir": "MyDrive/MWAHAHA_Competition/outputs",
     "batch_size": 16,
     "noun_seed_base": 42,
     "replan_every": 5,

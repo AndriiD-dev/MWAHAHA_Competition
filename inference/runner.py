@@ -638,6 +638,8 @@ class InferenceRunner:
 
             if self.cfg.task == "title" and self.cfg.replan_every > 0 and (retry_round % self.cfg.replan_every == 0):
                 print(f"  Replanning {len(bad_indices)} items...")
+                t_replan = time.time()
+                total = len(bad_indices)
                 for batch_index, batch_ids in enumerate(batched(bad_indices, self.cfg.batch_size), start=1):
                     batch_texts: List[str] = []
                     for i in batch_ids:
@@ -661,7 +663,13 @@ class InferenceRunner:
                             meta=metas[batch_ids[0]],
                         )
 
+                    elapsed_seconds = time.time() - t_replan
+                    done = min(batch_index * self.cfg.batch_size, total)
+                    print(f"  replan batches: {batch_index}  ({done}/{total}, elapsed {elapsed_seconds:.1f}s)")
+
             new_bad: List[int] = []
+            t_retry = time.time()
+            total = len(bad_indices)
             for batch_index, batch_ids in enumerate(batched(bad_indices, self.cfg.batch_size), start=1):
                 batch_texts: List[str] = []
                 for i in batch_ids:
@@ -701,6 +709,10 @@ class InferenceRunner:
                     if not self._is_good(df, i, outputs[i]):
                         new_bad.append(i)
                         ever_failed.add(i)
+
+                elapsed_seconds = time.time() - t_retry
+                done = min(batch_index * self.cfg.batch_size, total)
+                print(f"  retry {retry_round} batches: {batch_index}  ({done}/{total}, elapsed {elapsed_seconds:.1f}s)")
 
             bad_indices = new_bad
 

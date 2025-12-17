@@ -6,6 +6,7 @@ RUNNER_CONFIG = {
     "input_path": Path("data/task-a-two-words.csv"),
     "output_dir": Path("outputs"),
     "output_filename": "task-a-two-words_predictions_base.tsv",
+    "drive_output_dir": "MyDrive/MWAHAHA_Competition/outputs",
     "batch_size": 16,
     "plan_decode": {
         "max_new_tokens": 72,
