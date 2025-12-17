@@ -560,10 +560,9 @@ class InferenceRunner:
                     meta=metas[batch_ids[0]],
                 )
 
-            if batch_index % 10 == 0:
-                dt = time.time() - t_plan
-                done = min(batch_index * self.cfg.batch_size, n)
-                print(f"  plan batches: {batch_index}  ({done}/{n}, elapsed {dt:.1f}s)")
+            dt = time.time() - t_plan
+            done = min(batch_index * self.cfg.batch_size, n)
+            print(f"  plan batches: {batch_index}  ({done}/{n}, elapsed {dt:.1f}s)")
 
         print(f"PLAN done in {time.time() - t_plan:.1f}s")
 
@@ -610,10 +609,9 @@ class InferenceRunner:
                     evaluation=evaluation,
                 )
 
-            if batch_index % 10 == 0:
-                dt = time.time() - t_final
-                done = min(batch_index * self.cfg.batch_size, n)
-                print(f"  final batches: {batch_index}  ({done}/{n}, elapsed {dt:.1f}s)")
+            dt = time.time() - t_final
+            done = min(batch_index * self.cfg.batch_size, n)
+            print(f"  final batches: {batch_index}  ({done}/{n}, elapsed {dt:.1f}s)")
 
         bad_indices: List[int] = []
         for i in indices:
