@@ -122,6 +122,8 @@ def _retry_steps_from_list(xs: Sequence[Dict[str, Any]]) -> Tuple[RetryStep, ...
     return tuple(out)
 
 
+
+
 def load_runner_config(path: Path) -> RunnerConfig:
     """
     Loads a config python file that defines RUNNER_CONFIG as either:
@@ -361,9 +363,29 @@ class InferenceRunner:
             return df
 
         if self.cfg.task == "title":
-            df = pd.read_csv(self.cfg.input_path, keep_default_na=False)
+            # Title files in this project are typically TSV (tab-separated), even if named *.csv.
+            # Using comma-sep breaks when headlines contain commas.
+            try:
+                df = pd.read_csv(self.cfg.input_path, sep="\t", keep_default_na=False)
+            except Exception:
+                # Last-resort: treat as "one headline per line"
+                lines = Path(self.cfg.input_path).read_text(encoding="utf-8", errors="replace").splitlines()
+                # drop header if present
+                if lines and lines[0].strip().lower() == "headline":
+                    lines = lines[1:]
+                df = pd.DataFrame({"headline": lines})
+
+            # If the file has no header row, pandas might name the column 0
+            if "headline" not in df.columns:
+                if len(df.columns) == 1:
+                    df = df.rename(columns={df.columns[0]: "headline"})
+                elif len(df.columns) >= 2:
+                    # common case: id + headline
+                    df = df.rename(columns={df.columns[1]: "headline"})
+
             if "headline" not in df.columns:
                 raise ValueError(f"Missing required column 'headline' in {self.cfg.input_path}")
+
             df["headline"] = df["headline"].fillna("").astype(str)
 
             print("Preparing nouns for each headline (spaCy noun extraction)...")
@@ -387,7 +409,7 @@ class InferenceRunner:
 
                 if (i + 1) % 50 == 0 or (i + 1) == n:
                     dt = time.time() - t0
-                    print(f"  nouns: {i+1}/{n}  (elapsed {dt:.1f}s)")
+                    print(f"  nouns: {i + 1}/{n}  (elapsed {dt:.1f}s)")
 
             df["noun1"] = noun1_list
             df["noun2"] = noun2_list
