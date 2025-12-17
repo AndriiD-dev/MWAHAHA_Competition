@@ -741,11 +741,14 @@ class InferenceRunner:
         if "id" not in out_df.columns:
             out_df.insert(0, "id", [str(i) for i in range(len(out_df))])
 
-
         out_df["prediction"] = outputs
 
+        print(f"\nSaving predictions to: {out_path}")
+
+        out_df.to_csv(out_path, sep="\t", index=False)
 
         zip_path = zip_file(out_path)
+        print(f"Zipping to: {zip_path}")
 
         # ---------------------------------------------------------------------
         # Log summaries at the end
