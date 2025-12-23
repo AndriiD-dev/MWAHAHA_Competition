@@ -4,8 +4,8 @@ import random
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
-from inference.config import PromptBuilderConfig
 
+from inference.config import PromptBuilderConfig
 from inference.utils.spacy_extractor import SpacyAnchorExtractor
 from inference.utils.wiki_reader import WikipediaReader
 
@@ -21,16 +21,16 @@ def normalize_one_line(text: str) -> str:
 
 
 def safe_word(word: str) -> str:
-    """Trim whitespace only. Do not destroy internal casing."""
     return normalize_one_line(word).strip()
+
 
 @dataclass
 class PromptBuilder:
-    """Single source of truth for prompt construction.
+    """
+    Single source of truth for prompt construction.
 
     - uses WikipediaReader for microcard FACTS
     - uses SpacyAnchorExtractor for headline noun selection
-    - centralizes normalization and required-word validation
     """
 
     config: PromptBuilderConfig = field(default_factory=PromptBuilderConfig)
@@ -56,6 +56,7 @@ class PromptBuilder:
     # ------------------------------------------------------------------
     # Wiki -> microcards
     # ------------------------------------------------------------------
+
     def _guess_domain(self, extract: str) -> str:
         t = extract.lower()
         for domain, hints in self.config.microcards.domain_hints.items():
@@ -141,17 +142,47 @@ class PromptBuilder:
 
         return "FACTS:\n" + fmt_one(w1) + "\n" + fmt_one(w2)
 
+    def format_cards_block_unlabeled(self, word1: str, word2: str) -> str:
+        """
+        Caption task wants the same microcards, but without:
+          - "FACTS:"
+          - "- <word>:" labels
+          - any "required words" framing
+        We still include enough concrete text so the caption can naturally reuse it.
+        """
+        microcards = self.build_microcards_dict(word1, word2)
+        w1 = safe_word(word1)
+        w2 = safe_word(word2)
+
+        def fmt_one(w: str) -> str:
+            card = microcards.get(w, {})
+            what = normalize_one_line(card.get("what", ""))
+            domain = normalize_one_line(card.get("domain", ""))
+            keywords = card.get("keywords", []) or []
+            kw = ", ".join(list(keywords)[: self.config.wiki.microcard_keywords_max])
+
+            parts: List[str] = []
+            if what:
+                parts.append(f"WHAT: {what}")
+            if domain:
+                parts.append(f"DOMAIN: {domain}")
+            if kw:
+                parts.append(f"KEYWORDS: {kw}")
+
+            # Intentionally *do not* include the word label.
+            # The Wikipedia sentence often repeats the term; if not, the caption still has to pass internal checks.
+            return "- " + " | ".join(parts)
+
+        return "CARDS:\n" + fmt_one(w1) + "\n" + fmt_one(w2)
+
     def save_wiki_cache(self) -> None:
         assert self.wiki is not None
         try:
             self.wiki.save_cache(self.config.paths.wiki_cache_path)
         except Exception:
-            # cache saving must never break inference
             pass
 
-    # ------------------------------------------------------------------
-    # spaCy: noun selection for headline task
-    # ------------------------------------------------------------------
+   
     def choose_two_nouns_from_headline(
         self,
         headline: str,
@@ -214,9 +245,7 @@ class PromptBuilder:
             return (tokens[0], tokens[0])
         return ("", "")
 
-    # ------------------------------------------------------------------
-    # Prompt building: Two words
-    # ------------------------------------------------------------------
+   
     def build_two_words_plan_messages(self, word1: str, word2: str) -> List[Dict[str, str]]:
         w1 = safe_word(word1)
         w2 = safe_word(word2)
@@ -250,9 +279,7 @@ PLAN (do not quote): {plan}
 
         return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
-    # ------------------------------------------------------------------
-    # Prompt building: Title (headline)
-    # ------------------------------------------------------------------
+  
     def build_title_plan_messages(self, headline: str, noun1: str, noun2: str) -> List[Dict[str, str]]:
         h = normalize_one_line(headline)
         n1 = safe_word(noun1)
@@ -290,4 +317,17 @@ PLAN (do not quote): {plan}
 {self.config.prompts.title_final_task.format(headline=h, noun1=n1, noun2=n2, plan=plan)}"""
         )
 
+        return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+
+    def build_caption_messages(self, scene: str, noun1: str, noun2: str) -> List[Dict[str, str]]:
+        s = normalize_one_line(scene)
+        n1 = safe_word(noun1)
+        n2 = safe_word(noun2)
+
+        system = self.config.prompts.caption_common
+        cards = self.format_cards_block_unlabeled(n1, n2)
+
+        user = normalize_one_line(self.config.prompts.caption_task.format(scene=s, cards=cards))
         return [{"role": "system", "content": system}, {"role": "user", "content": user}]
