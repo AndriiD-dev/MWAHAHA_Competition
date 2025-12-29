@@ -75,6 +75,9 @@ class SpacySettings:
     # Candidate selection
     allowed_parts_of_speech: Tuple[str, ...] = ("NOUN", "PROPN")
     min_token_chars: int = 2
+
+    # If True, noun chunks are considered as candidates, but they will be reduced
+    # to "clean noun phrases" (compounds + head), and determiners/possessives removed.
     allow_noun_chunks: bool = True
     max_chunk_tokens: int = 3
 
@@ -85,7 +88,28 @@ class SpacySettings:
     # Candidate text cleaning
     whitespace_pattern: str = r"\s+"
     normalize_curly_apostrophe: bool = True
-    phrase_allowed_chars_pattern: str = r"[^A-Za-z0-9 \-']"  # characters to REMOVE
+
+    # IMPORTANT: This pattern is applied, but disallowed characters are replaced with SPACE
+    # in the extractor (to prevent concatenation like familyMom).
+    phrase_allowed_chars_pattern: str = r"[^A-Za-z0-9 \-']"
+
+    # --- New: stricter "clean noun" controls ---
+    strip_leading_determiners: bool = True              # the/a/an/this/that/these/those
+    strip_leading_possessives: bool = True              # my/your/his/her/our/their/its
+    strip_leading_slang_possessives: bool = True        # me/ma (joke corpora often uses these)
+    split_camelcase: bool = True                        # familyMom -> family Mom
+
+    # Hyphens and digits
+    split_hyphens_to_space: bool = True                 # x-ray -> x ray, -year-old -> year old
+    reject_if_contains_digit: bool = True               # 3 wise men, 50 shades, etc.
+    reject_if_starts_with_punct: bool = True            # -You'll
+
+    # Enforce tokens are "word-ish"
+    require_alpha_tokens_only: bool = True              # after stripping apostrophes: only letters in each token
+    reject_contraction_like: bool = True                # You'll, I'm, we're, etc.
+
+    # Normalization preference for Wikipedia: use lemma for common nouns
+    use_lemma_for_common_nouns: bool = True
 
     # Similarity guard (base form heuristics)
     baseform_strip_possessive: bool = True
@@ -122,7 +146,7 @@ class RequiredWordsSettings:
     allow_singular_from_plural: bool = True   # "eggs" anchor will also accept "egg"
     allow_verb_ed: bool = True                # "spray" anchor will also accept "sprayed"
     allow_verb_ing: bool = True               # "spray" anchor will also accept "spraying"
-
+    
 
 
 # =============================================================================

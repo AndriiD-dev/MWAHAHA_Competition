@@ -7,7 +7,7 @@ from typing import List, Optional, Sequence, Set, Tuple
 
 import spacy
 from spacy.language import Language
-from spacy.tokens import Doc
+from spacy.tokens import Doc, Span, Token
 
 from inference.config import RequiredWordsSettings, SpacySettings
 
@@ -22,6 +22,33 @@ class SpacyAnchorExtractor:
 
     _nlp: Optional[Language] = field(default=None, init=False, repr=False)
 
+    # Determiners / possessives to strip (kept in code for speed and clarity)
+    _DET_PREFIX_RE: re.Pattern = field(default=re.compile(
+        r"^(?:the|a|an|this|that|these|those)\s+",
+        flags=re.IGNORECASE,
+    ), init=False, repr=False)
+
+    _POSS_PREFIX_RE: re.Pattern = field(default=re.compile(
+        r"^(?:my|your|his|her|our|their|its)\s+",
+        flags=re.IGNORECASE,
+    ), init=False, repr=False)
+
+    _SLANG_POSS_PREFIX_RE: re.Pattern = field(default=re.compile(
+        r"^(?:me|ma)\s+",
+        flags=re.IGNORECASE,
+    ), init=False, repr=False)
+
+    _LEADING_PUNCT_RE: re.Pattern = field(default=re.compile(
+        r"^[\-\–\—•\*\u2022\"'“”‘’`]+\s*"
+    ), init=False, repr=False)
+
+    _CONTRACTION_RE: re.Pattern = field(default=re.compile(
+        r"'(?:ll|re|ve|m|d|s)$",
+        flags=re.IGNORECASE,
+    ), init=False, repr=False)
+
+    _CAMEL_SPLIT_RE: re.Pattern = field(default=re.compile(r"([a-z])([A-Z])"), init=False, repr=False)
+
     def __post_init__(self) -> None:
         self._ws_re = re.compile(self.settings.whitespace_pattern)
 
@@ -32,6 +59,14 @@ class SpacyAnchorExtractor:
 
     def normalize_one_line(self, text: str) -> str:
         text = "" if text is None else str(text)
+
+        # Make common markup separators become spaces (prevents concatenation downstream)
+        text = text.replace("_", " ")
+        text = re.sub(r"[\[\]\(\)\{\}<>\|/\\]+", " ", text)
+
+        # Remove bullet prefixes at line starts: "- blah" -> " blah"
+        text = re.sub(r"(?m)^\s*-\s+", " ", text)
+
         return self._ws_re.sub(" ", text).strip()
 
     def safe_phrase_preserve_case(self, text: str) -> str:
@@ -40,7 +75,10 @@ class SpacyAnchorExtractor:
             return ""
         if self.settings.normalize_curly_apostrophe:
             t = t.replace("’", "'")
-        t = re.sub(self.settings.phrase_allowed_chars_pattern, "", t)
+
+        # IMPORTANT: replace disallowed chars with SPACE (not empty) to avoid fusing tokens
+        t = re.sub(self.settings.phrase_allowed_chars_pattern, " ", t)
+
         t = self._ws_re.sub(" ", t).strip()
         return t
 
@@ -53,15 +91,131 @@ class SpacyAnchorExtractor:
             t = t[: self.settings.max_text_chars]
         return nlp(t)
 
+    # ---------------------------
+    # Candidate cleaning / checks
+    # ---------------------------
+
+    def _strip_prefixes(self, t: str) -> str:
+        if self.settings.reject_if_starts_with_punct:
+            t = self._LEADING_PUNCT_RE.sub("", t)
+
+        if self.settings.strip_leading_determiners:
+            t = self._DET_PREFIX_RE.sub("", t)
+        if self.settings.strip_leading_possessives:
+            t = self._POSS_PREFIX_RE.sub("", t)
+        if self.settings.strip_leading_slang_possessives:
+            t = self._SLANG_POSS_PREFIX_RE.sub("", t)
+
+        return t.strip()
+
+    def _maybe_split_camelcase(self, t: str) -> str:
+        if not self.settings.split_camelcase:
+            return t
+        return self._CAMEL_SPLIT_RE.sub(r"\1 \2", t)
+
+    def _maybe_split_hyphens(self, t: str) -> str:
+        if not self.settings.split_hyphens_to_space:
+            return t
+        return t.replace("-", " ")
+
+    def _is_alpha_tokens_only(self, t: str) -> bool:
+        # Allow apostrophes inside names, but for the alpha check, remove them
+        parts = t.split()
+        if not parts:
+            return False
+        for p in parts:
+            p2 = p.replace("'", "")
+            if not p2.isalpha():
+                return False
+        return True
+
+    def _clean_candidate_text(self, text: str) -> str:
+        # 1) normalize + safe chars
+        t = self.safe_phrase_preserve_case(text)
+        if not t:
+            return ""
+
+        # 2) optional camel split (familyMom -> family Mom)
+        t = self._maybe_split_camelcase(t)
+
+        # 3) remove leading bullets/punct, strip determiners/possessives
+        t = self._strip_prefixes(t)
+        if not t:
+            return ""
+
+        # 4) hyphens -> spaces (avoid "-year", "x-ray", etc.)
+        t = self._maybe_split_hyphens(t)
+        t = self._ws_re.sub(" ", t).strip()
+        if not t:
+            return ""
+
+        # 5) reject contraction-like endings (You'll, I'm, we're, ...)
+        if self.settings.reject_contraction_like and self._CONTRACTION_RE.search(t):
+            return ""
+
+        # 6) digits policy
+        if self.settings.reject_if_contains_digit and any(ch.isdigit() for ch in t):
+            return ""
+
+        # 7) enforce “word-ish” tokens
+        if self.settings.require_alpha_tokens_only and not self._is_alpha_tokens_only(t):
+            return ""
+
+        return t
+
     def _is_bad_candidate(self, text: str) -> bool:
         if not text:
             return True
         low = text.lower()
+
         if low in self.generic_nouns:
             return True
         if low in self.extra_stopwords:
             return True
+
+        # common low-signal tokens in joke corpora
+        if low in {"u", "ur", "ya", "yall", "idk", "btw", "tbh"}:
+            return True
+
         return False
+
+    # ---------------------------
+    # Chunk reduction (avoid "bad people", prefer compounds like "lottery ticket")
+    # ---------------------------
+
+    def _compound_head_phrase(self, chunk: Span) -> str:
+        """
+        Build a clean noun phrase from a noun chunk:
+        - Keep head noun (chunk.root)
+        - Keep COMPOUND and FLAT modifiers attached to the head
+        - Drop determiners, possessives, adjectives, pronouns
+        """
+        root = chunk.root
+
+        # Collect tokens we keep: compounds + flats + root
+        keep: List[Token] = []
+        for t in chunk:
+            if t.is_space or t.is_punct:
+                continue
+            if t == root:
+                keep.append(t)
+                continue
+            # compound nouns: "lottery ticket"
+            if t.dep_ == "compound" and t.pos_ in self.settings.allowed_parts_of_speech:
+                keep.append(t)
+                continue
+            # names: "New York", "Taylor Swift" often use flat / compound on PROPN
+            if t.dep_ == "flat" and t.pos_ == "PROPN":
+                keep.append(t)
+                continue
+
+        keep = sorted(set(keep), key=lambda x: x.i)
+        phrase = " ".join(t.text for t in keep).strip()
+        return phrase
+
+    # ---------------------------
+    # Extraction
+    # ---------------------------
 
     def extract_candidates(self, text: str) -> List[str]:
         doc = self.parse(text)
@@ -69,6 +223,8 @@ class SpacyAnchorExtractor:
         seen = set()
 
         for tok in doc:
+            if tok.pos_ == "PRON":
+                continue
             if tok.pos_ not in self.settings.allowed_parts_of_speech:
                 continue
             if tok.is_space or tok.is_punct or tok.like_num:
@@ -78,7 +234,11 @@ class SpacyAnchorExtractor:
             if tok.is_stop:
                 continue
 
-            cand = self.safe_phrase_preserve_case(tok.text)
+            raw = tok.text
+            if self.settings.use_lemma_for_common_nouns and tok.pos_ == "NOUN":
+                raw = tok.lemma_
+
+            cand = self._clean_candidate_text(raw)
             if not cand or self._is_bad_candidate(cand):
                 continue
 
@@ -89,15 +249,23 @@ class SpacyAnchorExtractor:
 
         if self.settings.allow_noun_chunks:
             for chunk in doc.noun_chunks:
-                toks = [t for t in chunk if not (t.is_space or t.is_punct)]
+                # Reduce chunk -> (compounds + head) instead of raw chunk.text
+                reduced = self._compound_head_phrase(chunk)
+                if not reduced:
+                    continue
+
+                # Hard cap on token count after reduction
+                toks = [t for t in reduced.split() if t]
                 if not toks:
                     continue
                 if len(toks) > self.settings.max_chunk_tokens:
                     continue
+
+                # root must be noun/proper noun
                 if chunk.root.pos_ not in self.settings.allowed_parts_of_speech:
                     continue
 
-                text_chunk = self.safe_phrase_preserve_case(chunk.text)
+                text_chunk = self._clean_candidate_text(reduced)
                 if not text_chunk or self._is_bad_candidate(text_chunk):
                     continue
 
@@ -108,8 +276,13 @@ class SpacyAnchorExtractor:
 
         return out
 
+    # ---------------------------
+    # Similarity base-form
+    # ---------------------------
+
     def base_form_for_similarity(self, phrase: str) -> str:
-        p = self.safe_phrase_preserve_case(phrase)
+        # Apply the same cleaning so "the cop" and "cop" collapse
+        p = self._clean_candidate_text(phrase)
         if not p:
             return ""
 
@@ -119,7 +292,6 @@ class SpacyAnchorExtractor:
         parts = p.split()
         last = parts[-1]
         low = last.lower()
-
         minlen = int(self.settings.baseform_min_len_for_plural_rules)
 
         if self.settings.baseform_variant_ies_to_y and low.endswith("ies") and len(low) > minlen:
