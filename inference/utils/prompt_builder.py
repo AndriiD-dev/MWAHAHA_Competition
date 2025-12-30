@@ -8,6 +8,10 @@ from typing import Dict, List, Optional, Tuple
 from inference.config import PromptBuilderConfig
 from inference.utils.spacy_extractor import SpacyAnchorExtractor
 from inference.utils.wiki_reader import WikipediaReader
+from typing import Literal, Mapping, Callable
+
+Mode = Literal["two_words", "headline", "image_caption_b1", "image_caption_b2"]
+HumorType = Literal["pun", "irony", "satire"]
 
 
 _WS_RE = re.compile(r"\s+")
@@ -142,39 +146,6 @@ class PromptBuilder:
 
         return "FACTS:\n" + fmt_one(w1) + "\n" + fmt_one(w2)
 
-    def format_cards_block_unlabeled(self, word1: str, word2: str) -> str:
-        """
-        Caption task wants the same microcards, but without:
-          - "FACTS:"
-          - "- <word>:" labels
-          - any "required words" framing
-        We still include enough concrete text so the caption can naturally reuse it.
-        """
-        microcards = self.build_microcards_dict(word1, word2)
-        w1 = safe_word(word1)
-        w2 = safe_word(word2)
-
-        def fmt_one(w: str) -> str:
-            card = microcards.get(w, {})
-            what = normalize_one_line(card.get("what", ""))
-            domain = normalize_one_line(card.get("domain", ""))
-            keywords = card.get("keywords", []) or []
-            kw = ", ".join(list(keywords)[: self.config.wiki.microcard_keywords_max])
-
-            parts: List[str] = []
-            if what:
-                parts.append(f"WHAT: {what}")
-            if domain:
-                parts.append(f"DOMAIN: {domain}")
-            if kw:
-                parts.append(f"KEYWORDS: {kw}")
-
-            # Intentionally *do not* include the word label.
-            # The Wikipedia sentence often repeats the term; if not, the caption still has to pass internal checks.
-            return "- " + " | ".join(parts)
-
-        return "CARDS:\n" + fmt_one(w1) + "\n" + fmt_one(w2)
-
     def save_wiki_cache(self) -> None:
         assert self.wiki is not None
         try:
@@ -245,89 +216,177 @@ class PromptBuilder:
             return (tokens[0], tokens[0])
         return ("", "")
 
-   
-    def build_two_words_plan_messages(self, word1: str, word2: str) -> List[Dict[str, str]]:
-        w1 = safe_word(word1)
-        w2 = safe_word(word2)
+    def _plan_prompt(self, mode: Mode, humor_type: HumorType) -> str:
+        p = self.config.prompts
 
-        system = self.config.prompts.plan_common
-        facts = self.format_facts_block(w1, w2)
+        key = (mode, humor_type)
+        table: Dict[Tuple[str, str], str] = {
+            ("two_words", "pun"): p.two_words_pun_plan_task,
+            ("two_words", "irony"): p.two_words_irony_plan_task,
+
+            ("headline", "satire"): p.headline_satire_plan_task,
+            ("headline", "irony"): p.headline_irony_plan_task,
+
+            ("image_caption_b1", "pun"): p.caption_mm_b1_pun_plan_task,
+            ("image_caption_b1", "irony"): p.caption_mm_b1_irony_plan_task,
+
+            ("image_caption_b2", "pun"): p.caption_mm_b2_pun_plan_task,
+            ("image_caption_b2", "irony"): p.caption_mm_b2_irony_plan_task,
+        }
+
+        if key not in table:
+            raise ValueError(f"Unsupported plan prompt: mode={mode} humor_type={humor_type}")
+        return table[key]
+
+    def _final_prompt(self, mode: Mode) -> str:
+        """
+        These should be your token-efficient finals you created earlier in config PromptTexts.
+        If you used different attribute names, adjust them here.
+        """
+        p = self.config.prompts
+
+        # Expect these to exist in PromptTexts:
+        # - two_words_final_task
+        # - headline_final_task
+        # - caption_mm_b1_final_task
+        # - caption_mm_b2_final_task
+        if mode == "two_words":
+            return p.two_words_final_task
+        if mode == "headline":
+            return p.headline_final_task
+        if mode == "image_caption_b1":
+            return p.caption_mm_b1_final_task
+        if mode == "image_caption_b2":
+            return p.caption_mm_b2_final_task
+
+        raise ValueError(f"Unsupported final prompt: mode={mode}")
+
+
+    def _include_facts_in_plan(self, mode: Mode) -> bool:
+        # We only keep microcards where your plan templates say "contexts in FACTS".
+        return mode in {"two_words", "headline"}
+
+
+# --- add new generic plan builder ---
+    def build_plan_messages(
+        self,
+        *,
+        mode: Mode,
+        humor_type: HumorType,
+        noun1: str = "",
+        noun2: str = "",
+        headline: str = "",
+        image_facts: str = "",
+        prompt_text: str = "",
+    ) -> List[Dict[str, str]]:
+        n1 = safe_word(noun1)
+        n2 = safe_word(noun2)
+        h = normalize_one_line(headline)
+        img = normalize_one_line(image_facts)
+        pt = normalize_one_line(prompt_text)
+
+        system = self.config.prompts.system_plan
+        plan_task = self._plan_prompt(mode, humor_type)
+
+        # Minimal, explicit inputs (token-efficient but unambiguous)
+        header_parts: List[str] = []
+        if mode in {"two_words", "headline"}:
+            header_parts.append(f"NOUNS: {n1} | {n2}")
+        if mode == "headline":
+            header_parts.append(f"HEADLINE: {h}")
+        if mode in {"image_caption_b1", "image_caption_b2"}:
+            header_parts.append(f"IMAGE_FACTS: {img}")
+        if mode == "image_caption_b2":
+            header_parts.append(f"PROMPT_TEXT: {pt}")
+
+        header = "\n".join(x for x in header_parts if x)
+
+        # Optional microcards (plan step only; text tasks only)
+        facts = ""
+        if self._include_facts_in_plan(mode):
+            facts = self.format_facts_block(n1, n2)
 
         user = normalize_one_line(
-            f"""{facts}
-
-{self.config.prompts.two_words_plan_task.format(word1=w1, word2=w2)}"""
+            "\n\n".join(x for x in [header, facts, plan_task] if x)
         )
 
         return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+# --- add new generic final builder (NO microcards) ---
+    def build_final_messages(
+        self,
+        *,
+        mode: Mode,
+        plan_text: str,
+        noun1: str = "",
+        noun2: str = "",
+        headline: str = "",
+        image_facts: str = "",
+        prompt_text: str = "",
+    ) -> List[Dict[str, str]]:
+        n1 = safe_word(noun1)
+        n2 = safe_word(noun2)
+        h = normalize_one_line(headline)
+        img = normalize_one_line(image_facts)
+        pt = normalize_one_line(prompt_text)
+        plan = normalize_one_line(plan_text)
+
+        system = self.config.prompts.system_final
+        tmpl = self._final_prompt(mode)
+
+        # Token-efficient finals: rely on plan + hard constraints + minimal inputs
+        # NOTE: your final templates should use these {placeholders}.
+        user = normalize_one_line(
+            tmpl.format(
+                noun1=n1,
+                noun2=n2,
+                headline=h,
+                image_facts=img,
+                prompt_text=pt,
+                plan=plan,
+            )
+        )
+
+        return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+# --- keep your existing methods but route them through the new logic ---
+    def build_two_words_plan_messages(self, word1: str, word2: str) -> List[Dict[str, str]]:
+        # Backward-compatible default: pun
+        return self.build_plan_messages(
+            mode="two_words",
+            humor_type="pun",
+            noun1=word1,
+            noun2=word2,
+        )
 
     def build_two_words_final_messages(self, word1: str, word2: str, plan_text: str) -> List[Dict[str, str]]:
-        w1 = safe_word(word1)
-        w2 = safe_word(word2)
-        plan = normalize_one_line(plan_text)
-
-        system = self.config.prompts.final_common
-        facts = self.format_facts_block(w1, w2)
-
-        user = normalize_one_line(
-            f"""{facts}
-
-PLAN (do not quote): {plan}
-
-{self.config.prompts.two_words_final_task.format(word1=w1, word2=w2)}"""
+        # NO microcards in final anymore
+        return self.build_final_messages(
+            mode="two_words",
+            noun1=word1,
+            noun2=word2,
+            plan_text=plan_text,
         )
 
-        return [{"role": "system", "content": system}, {"role": "user", "content": user}]
-
-  
     def build_title_plan_messages(self, headline: str, noun1: str, noun2: str) -> List[Dict[str, str]]:
-        h = normalize_one_line(headline)
-        n1 = safe_word(noun1)
-        n2 = safe_word(noun2)
-
-        system = self.config.prompts.plan_common
-        facts = self.format_facts_block(n1, n2)
-
-        user = normalize_one_line(
-            f"""{facts}
-
-{self.config.prompts.title_plan_task.format(headline=h, noun1=n1, noun2=n2)}"""
+        # Backward-compatible default: satire for headline
+        return self.build_plan_messages(
+            mode="headline",
+            humor_type="satire",
+            noun1=noun1,
+            noun2=noun2,
+            headline=headline,
         )
 
-        return [{"role": "system", "content": system}, {"role": "user", "content": user}]
-
-    def build_title_final_messages(
-        self,
-        headline: str,
-        noun1: str,
-        noun2: str,
-        plan_text: str,
-    ) -> List[Dict[str, str]]:
-        h = normalize_one_line(headline)
-        n1 = safe_word(noun1)
-        n2 = safe_word(noun2)
-        plan = normalize_one_line(plan_text)
-
-        system = self.config.prompts.final_common
-        facts = self.format_facts_block(n1, n2)
-
-        user = normalize_one_line(
-            f"""{facts}
-
-{self.config.prompts.title_final_task.format(headline=h, noun1=n1, noun2=n2, plan=plan)}"""
+    def build_title_final_messages(self, headline: str, noun1: str, noun2: str, plan_text: str) -> List[Dict[str, str]]:
+        # NO microcards in final anymore
+        return self.build_final_messages(
+            mode="headline",
+            noun1=noun1,
+            noun2=noun2,
+            headline=headline,
+            plan_text=plan_text,
         )
 
-        return [{"role": "system", "content": system}, {"role": "user", "content": user}]
-
-
-
-    def build_caption_messages(self, scene: str, noun1: str, noun2: str) -> List[Dict[str, str]]:
-        s = normalize_one_line(scene)
-        n1 = safe_word(noun1)
-        n2 = safe_word(noun2)
-
-        system = self.config.prompts.caption_common
-        cards = self.format_cards_block_unlabeled(n1, n2)
-
-        user = normalize_one_line(self.config.prompts.caption_task.format(scene=s, cards=cards))
-        return [{"role": "system", "content": system}, {"role": "user", "content": user}]

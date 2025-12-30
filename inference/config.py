@@ -16,6 +16,9 @@ class ProjectPaths:
     output_dir: Path = project_root / "outputs"
     wiki_cache_path: Path = data_dir / "wiki_cache.json"
 
+    vl_b1_scenes_csv: Path = data_dir / "task-b1.scenes.csv"
+    vl_b2_scenes_csv: Path = data_dir / "task-b2.scenes.csv"
+
 
 # =============================================================================
 # Wikipedia reader settings (ALL tunables live here)
@@ -155,54 +158,167 @@ class RequiredWordsSettings:
 
 @dataclass(frozen=True)
 class PromptTexts:
-    final_common: str = (
-        "You are a stand-up comedian. Write ONE original joke in English.\n"
-        "Return exactly one line under 30 words. No preface, no explanation, no emojis.\n"
-        "Avoid slurs or hate toward protected groups. Avoid explicit sexual content and graphic violence. "
-        "Mild innuendo, flirting, and cartoonish (non-graphic) mishaps are allowed.\n"
-        "Do not apologize or refuse; if the topic is sensitive, pivot to wordplay, absurdity, "
-        "or self-deprecation and still deliver a joke.\n"
-        "You may receive FACTS and PLAN blocks; use them only to guide the joke. Do not quote them."
+    system_plan: str = (
+        "You are a humor generation assistant. Follow instructions exactly. Output must be machine-parseable. One line. No extra text, no markdown."
     )
 
-    plan_common: str = (
-        "You are a stand-up comedian. First write a short private plan for a joke.\n"
-        "Do not write the joke yet. Output only the plan.\n"
-        "Keep it concise and practical. No preface, no emojis.\n"
-        "You may receive a FACTS block; use it only to understand the anchor words and do not quote it."
+    system_final: str = (
+        "You are a humor generation assistant. Follow instructions exactly. Output only the final required answer. One line. No extra text, no markdown."
+    )
+    two_words_pun_plan_task: str = (
+        "### Pun and wordplay\n"
+        "Definition: lexical pivot supports two readings; punchline forces the hidden one. Not irony or satire: language mechanics.\n"
+        "Inputs: mode=two_words; nouns=[noun1,noun2] exact; contexts in FACTS.\n"
+        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences).\n"
+        "Schema:\n"
+        '{"humor_type":"pun","mode":"two_words","nouns":["<noun1>","<noun2>"],'
+        '"noun_terms":{"noun1_terms":[...],"noun2_terms":[...]},'
+        '"shared_terms":[...],'
+        '"pivot_candidates":[{"pivot":"...","dual_readings":["surface","hidden"],"link":"..."}],'
+        '"pun_core":{"combination_proposition":"...","inferred_setup_candidates":[...],"hidden_setup_candidates":[...]},'
+        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
+        "Sizes: noun_terms 5-10 each; shared_terms 0-4; pivot_candidates 5-8; inferred_setup 2-5; hidden_setup 2-4.\n"
     )
 
-    two_words_plan_task: str = (
-        "Task: Create a short plan for a one-line joke that uses BOTH required words naturally.\n"
-        "Required words: '{word1}' and '{word2}'.\n"
-        "Output format: a single-line JSON object with keys "
-        "\"scenario\", \"misdirection\", \"word_placement\", \"device\".\n"
-        "Do not include the final joke."
+    caption_mm_b1_pun_plan_task: str = (
+        "### Pun and wordplay\n"
+        "Definition: lexical pivot supports two readings; punchline forces the hidden one. Not irony or satire: language mechanics.\n"
+        "Inputs: mode=image_caption_b1; image_facts present; no prompt_text; pick nouns as two concrete visible nouns.\n"
+        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences).\n"
+        "Schema:\n"
+        '{"humor_type":"pun","mode":"image_caption_b1","max_words":20,"nouns":["<noun1>","<noun2>"],'
+        '"noun_terms":{"noun1_terms":[...],"noun2_terms":[...]},'
+        '"shared_terms":[...],'
+        '"pivot_candidates":[{"pivot":"...","dual_readings":["surface","hidden"],"link":"..."}],'
+        '"pun_core":{"headline_knowledge":[...],"combination_proposition":"...","inferred_setup_candidates":[...],"hidden_setup_candidates":[...]},'
+        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
+        "Sizes: noun_terms 5-8 each; shared_terms 0-4; pivot_candidates 5-7; headline_knowledge 0-2; inferred_setup 2-4; hidden_setup 2-4. Must support final caption <= 20 words.\n"
+    )
+
+    caption_mm_b2_pun_plan_task: str = (
+        "### Pun and wordplay\n"
+        "Definition: lexical pivot supports two readings; punchline forces the hidden one. Not irony or satire: language mechanics.\n"
+        "Inputs: mode=image_caption_b2; image_facts present; prompt_text provided; complete prompt_text with humorous content; pick nouns as two concrete visible nouns.\n"
+        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences).\n"
+        "Schema:\n"
+        '{"humor_type":"pun","mode":"image_caption_b2","max_words":20,"prompt_text":"<prompt_text>","nouns":["<noun1>","<noun2>"],'
+        '"noun_terms":{"noun1_terms":[...],"noun2_terms":[...]},'
+        '"shared_terms":[...],'
+        '"pivot_candidates":[{"pivot":"...","dual_readings":["surface","hidden"],"link":"..."}],'
+        '"pun_core":{"headline_knowledge":[...],"combination_proposition":"...","inferred_setup_candidates":[...],"hidden_setup_candidates":[...]},'
+        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
+        "Sizes: noun_terms 5-8 each; shared_terms 0-4; pivot_candidates 5-7; headline_knowledge 0-2; inferred_setup 2-4; hidden_setup 2-4. Must support final completion <= 20 words total.\n"
+    )
+
+    headline_satire_plan_task: str = (
+        "### Satire\n"
+        "Definition: mock news framing that critiques public life (politics, media, corporate/platform, technology, culture) via exaggerated reporting.\n"
+        "Not pun or irony: core is public critique in news voice, not lexical ambiguity or everyday speaker reversal.\n"
+        "Inputs: mode=headline; headline provided; nouns=[noun1,noun2] available; contexts in FACTS.\n"
+        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences), except narrative_knowledge.\n"
+        "Schema:\n"
+        '{"humor_type":"satire","mode":"headline","headline":"<headline>","nouns":["<noun1>","<noun2>"],'
+        '"derived_framing":{"domain":"politics|media|corporate/platform|technology|culture",'
+        '"target_candidates":[...],"move_candidates":[...],"critique_candidates":[...]},'
+        '"narrative_knowledge":[...],'
+        '"satire_core":{"combination_proposition":"..."},'
+        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
+        "Sizes: target_candidates 2-3; move_candidates 2-3; critique_candidates 2-3; narrative_knowledge 2-4 (1 sentence each); combination_proposition 0-1 (1 sentence).\n"
+    )
+
+    two_words_irony_plan_task: str = (
+        "### Irony\n"
+        "Definition: intent mismatch (said ≠ meant), e.g., praise for something clearly bad or calm understatement for something annoying.\n"
+        "Not pun or satire: no wordplay pivot needed; no public target or mock-news voice required.\n"
+        "Inputs: mode=two_words; nouns=[noun1,noun2] exact; contexts in FACTS.\n"
+        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences), except everyday_knowledge.\n"
+        "Schema:\n"
+        '{"humor_type":"irony","mode":"two_words","nouns":["<noun1>","<noun2>"],'
+        '"derived_situation":{"domain":"daily life|work/school|services|home|health/energy",'
+        '"situation_candidates":[...],"negative_reality_candidates":[...],"positive_utterance_candidates":[...]},'
+        '"everyday_knowledge":[...],'
+        '"irony_core":{"combination_proposition":"..."},'
+        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
+        "Sizes: situation_candidates 2-3; negative_reality_candidates 2-3; positive_utterance_candidates 2-3; everyday_knowledge 2-4 (1 sentence each); combination_proposition 0-1 (1 sentence).\n"
+    )
+
+    headline_irony_plan_task: str = (
+        "### Irony\n"
+        "Definition: intent mismatch (said ≠ meant), e.g., praise for something clearly bad or calm understatement for something annoying.\n"
+        "Not pun or satire: no wordplay pivot needed; no public target or mock-news voice required.\n"
+        "Inputs: mode=headline; headline provided; nouns=[noun1,noun2] available; contexts in FACTS.\n"
+        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences), except everyday_knowledge.\n"
+        "Schema:\n"
+        '{"humor_type":"irony","mode":"headline","headline":"<headline>","nouns":["<noun1>","<noun2>"],'
+        '"derived_situation":{"domain":"daily life|work/school|services|home|health/energy",'
+        '"situation_candidates":[...],"negative_reality_candidates":[...],"positive_utterance_candidates":[...]},'
+        '"everyday_knowledge":[...],'
+        '"irony_core":{"combination_proposition":"..."},'
+        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
+        "Sizes: situation_candidates 2-3; negative_reality_candidates 2-3; positive_utterance_candidates 2-3; everyday_knowledge 2-4 (1 sentence each); combination_proposition 0-1 (1 sentence).\n"
+    )
+
+    caption_mm_b1_irony_plan_task: str = (
+        "### Irony\n"
+        "Definition: intent mismatch (said ≠ meant), e.g., praise for something clearly bad or calm understatement for something annoying.\n"
+        "Not pun or satire: no wordplay pivot needed; no public target or mock-news voice required.\n"
+        "Inputs: mode=image_caption_b1; image_facts present; no prompt_text; pick nouns as two concrete visible nouns.\n"
+        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences), except everyday_knowledge.\n"
+        "Schema:\n"
+        '{"humor_type":"irony","mode":"image_caption_b1","max_words":20,"nouns":["<noun1>","<noun2>"],'
+        '"derived_situation":{"domain":"daily life|work/school|services|home|health/energy",'
+        '"situation_candidates":[...],"negative_reality_candidates":[...],"positive_utterance_candidates":[...]},'
+        '"everyday_knowledge":[...],'
+        '"irony_core":{"combination_proposition":"..."},'
+        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
+        "Sizes: situation_candidates 2-3; negative_reality_candidates 2-3; positive_utterance_candidates 2-3; everyday_knowledge 2-4 (1 sentence each); combination_proposition 0-1 (1 sentence). Must support final caption <= 20 words.\n"
+    )
+
+    caption_mm_b2_irony_plan_task: str = (
+        "### Irony\n"
+        "Definition: intent mismatch (said ≠ meant), e.g., praise for something clearly bad or calm understatement for something annoying.\n"
+        "Not pun or satire: no wordplay pivot needed; no public target or mock-news voice required.\n"
+        "Inputs: mode=image_caption_b2; image_facts present; prompt_text provided; complete prompt_text with humorous content; pick nouns as two concrete visible nouns.\n"
+        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences), except everyday_knowledge.\n"
+        "Schema:\n"
+        '{"humor_type":"irony","mode":"image_caption_b2","max_words":20,"prompt_text":"<prompt_text>","nouns":["<noun1>","<noun2>"],'
+        '"derived_situation":{"domain":"daily life|work/school|services|home|health/energy",'
+        '"situation_candidates":[...],"negative_reality_candidates":[...],"positive_utterance_candidates":[...]},'
+        '"everyday_knowledge":[...],'
+        '"irony_core":{"combination_proposition":"..."},'
+        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
+        "Sizes: situation_candidates 2-3; negative_reality_candidates 2-3; positive_utterance_candidates 2-3; everyday_knowledge 2-4 (1 sentence each); combination_proposition 0-1 (1 sentence). Must support final completion <= 20 words total.\n"
     )
 
     two_words_final_task: str = (
-        "Write the final joke now.\n"
-        "Constraints: must include '{word1}' and '{word2}' exactly as written.\n"
-        "Output ONLY the joke."
+        "Write one short joke in English. One line only.\n"
+        "Must include BOTH words exactly: <noun1> and <noun2>.\n"
+        "Follow PLAN strictly (humor_type + candidates). No explanation.\n"
+        "PLAN: {plan}\n"
     )
 
-    title_plan_task: str = (
-        "Headline: {headline}\n"
-        "Anchor nouns: '{noun1}', '{noun2}'.\n\n"
-        "Task: Create a short plan for a one-line joke inspired by the headline.\n"
-        "The final joke must include BOTH anchor nouns exactly as written.\n"
-        "Output format: a single-line JSON object with keys "
-        "\"angle\", \"misdirection\", \"word_placement\", \"device\".\n"
-        "Do not include the final joke."
+    headline_final_task: str = (
+        "Write one short joke in English. One line only.\n"
+        "Must be clearly related to the headline (do not copy it verbatim).\n"
+        "Follow PLAN strictly (humor_type + candidates). No explanation.\n"
+        "HEADLINE: {headline}\n"
+        "PLAN: {plan}\n"
     )
 
-    title_final_task: str = (
-        "Headline: {headline}\n"
-        "Anchor nouns (must appear): '{noun1}', '{noun2}'.\n"
-        "PLAN (do not quote): {plan}\n\n"
-        "Write the final joke now.\n"
-        "Constraints: one line, under 30 words, include BOTH anchor nouns (you may pluralize or use possessive).\n"
-        "Output ONLY the joke."
+    caption_mm_b1_final_task: str = (
+        "Write one humorous caption in English for the GIF. One line only. Max 20 words.\n"
+        "Follow PLAN strictly (humor_type + candidates). No explanation.\n"
+        "IMAGE_FACTS: {image_facts}\n"
+        "PLAN: {plan}\n"
+    )
+
+    caption_mm_b2_final_task: str = (
+        "Complete PROMPT_TEXT in English using the GIF. Output must start with PROMPT_TEXT exactly.\n"
+        "One line only. Max 20 words total (including PROMPT_TEXT).\n"
+        "Follow PLAN strictly (humor_type + candidates). No explanation.\n"
+        "PROMPT_TEXT: {prompt_text}\n"
+        "IMAGE_FACTS: {image_facts}\n"
+        "PLAN: {plan}\n"
     )
 
 
@@ -228,6 +344,45 @@ class MicrocardSettings:
         "it", "its", "this", "that", "these", "those",
     })
 
+@dataclass(frozen=True)
+class VLSceneExtractorSettings:
+    # Model
+    model_id: str = "Qwen/Qwen2.5-VL-3B-Instruct"
+    attn_implementation: str = "sdpa"
+
+    # Decoding / retries
+    max_tries: int = 6
+    max_new_tokens: int = 160
+    temperature: float = 0.3
+    top_p: float = 0.9
+
+    # Output column names (CSV)
+    scene_col: str = "scene"  # keep "scene" for now (runner compatibility)
+    noun1_col: str = "noun1"
+    noun2_col: str = "noun2"
+
+    # New: JSON keys aligned with plan prompts
+    json_facts_key: str = "image_facts"
+    json_nouns_key: str = "nouns"
+
+    system_prompt: str = (
+        "Return ONE LINE JSON only. No markdown. No extra keys.\n"
+        "Schema:\n"
+        '{"image_facts":"...","nouns":["...","..."]}\n'
+        "Rules:\n"
+        "- image_facts: neutral, concrete, visible-only; 1 sentence; 8-25 words; no jokes.\n"
+        "- nouns: exactly 2 distinct visible common nouns; lowercase a-z; single word; avoid generic (person, people, thing, object, stuff).\n"
+    )
+
+    user_prompt: str = "Analyze the images and produce the JSON."
+
+    repair_user_template: str = (
+        "Fix your output to match Schema and Rules. Return ONE LINE JSON only.\n"
+        "Previous: {previous}\n"
+    )
+
+    banned_nouns_extra: Tuple[str, ...] = ("object", "thing", "stuff", "person", "people")
+
 
 # =============================================================================
 # Top-level config object
@@ -241,6 +396,8 @@ class PromptBuilderConfig:
     required_words: RequiredWordsSettings = field(default_factory=RequiredWordsSettings)
     prompts: PromptTexts = field(default_factory=PromptTexts)
     microcards: MicrocardSettings = field(default_factory=MicrocardSettings)
+
+    vl_scene_extractor: VLSceneExtractorSettings = field(default_factory=VLSceneExtractorSettings)
 
     generic_nouns: FrozenSet[str] = frozenset({
         "thing", "things", "stuff", "someone", "anyone", "everyone",
