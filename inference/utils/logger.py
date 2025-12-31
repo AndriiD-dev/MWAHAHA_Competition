@@ -278,3 +278,31 @@ class Logger:
             }
         )
 
+    def log_event(self, event_type: str, payload: Dict[str, Any]) -> None:
+        self._write_json_block(
+            {
+                "type": event_type,
+                "time_iso": _now_iso(),
+                "time_hms": _now_hms(),
+                **(payload or {}),
+            }
+        )
+
+    def log_batch_timing(
+        self,
+        *,
+        stage: str,
+        batch_index: int,
+        batch_size: int,
+        seconds: float,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.log_event(
+            "batch_timing",
+            {
+                "stage": stage,
+                "batch": {"index": batch_index, "size": batch_size},
+                "seconds": float(seconds),
+                "extra": extra or {},
+            },
+        )

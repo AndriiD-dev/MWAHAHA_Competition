@@ -136,6 +136,14 @@ class RunnerConfig:
     drive_output_dir: Optional[str] = None
 
 
+def _ts() -> str:
+    return time.strftime("%H:%M:%S")
+
+
+def _fmt_seconds(x: float) -> str:
+    return f"{x:.2f}s"
+
+
 def _as_path(x: Any) -> Path:
     if isinstance(x, Path):
         return x
@@ -791,170 +799,329 @@ class InferenceRunner:
 
         df, mode = self._load_dataframe()
         n = len(df)
+        indices = list(range(n))
+        total_batches = (n + self.cfg.batch_size - 1) // self.cfg.batch_size
 
         logger = Logger(enabled=True, log_path=log_path, max_chars=900)
-        logger.log_run_meta(
-            {
-                "task": self.cfg.task,
-                "mode": mode,
-                "base_model_id": self.cfg.base_model_id,
-                "lora_adapter_path": self.cfg.lora_adapter_path,
-                "input_path": str(self.cfg.input_path),
-                "output_dir": str(self.cfg.output_dir),
-                "output_filename": self.cfg.output_filename,
-                "batch_size": self.cfg.batch_size,
-                "caption_max_words": self.cfg.caption_max_words,
-                "scenes_output_csv": str(self.cfg.scenes_output_csv) if self.cfg.scenes_output_csv else None,
-                "vl_scene_extractor_module": self.cfg.vl_scene_extractor_module,
-                "vl_force_rerun": self.cfg.vl_force_rerun,
-            }
-        )
 
-        model, tokenizer = load_model_and_tokenizer(self.cfg.base_model_id, self.cfg.lora_adapter_path)
-
-        # Decide humor type per row
-        metas: List[Dict[str, Any]] = []
-        humor_types: List[HumorType] = [""] * n
-
-        for i in range(n):
-            meta: Dict[str, Any] = {"mode": mode, "humor_type": "", "headline": None, "plan": None}
-
-            if mode == "two_words":
-                ht = self._choose_humor_for_two_words()
-            elif mode == "headline":
-                ht = self._choose_humor_for_headline(str(df.loc[i, "headline"]))
-                meta["headline"] = str(df.loc[i, "headline"])
-            elif mode in {"image_caption_b1", "image_caption_b2"}:
-                ht = self._choose_humor_for_image(str(df.loc[i, "image_facts"]), str(df.loc[i, "noun1"]), str(df.loc[i, "noun2"]))
-            else:
-                ht = "irony"
-
-            humor_types[i] = ht
-            meta["humor_type"] = ht
-            metas.append(meta)
-
-        indices = list(range(n))
-
-        # ---------------------------
-        # PLAN stage
-        # ---------------------------
-        plans: List[str] = [""] * n
-        for batch_ids in batched(indices, self.cfg.batch_size):
-            batch_texts: List[str] = []
-            for i in batch_ids:
-                msgs = self._build_plan_messages(df, i, mode=mode, humor_type=humor_types[i])
-                batch_texts.append(to_chat_text(tokenizer, msgs))
-
-            batch_out = generate_batch_once(model, tokenizer, batch_texts, self.cfg.plan_decode)
-
-            for local, i in enumerate(batch_ids):
-                p = normalize_one_line(batch_out[local])
-                if not p:
-                    p = self._fallback_plan(df, i, mode=mode, humor_type=humor_types[i])
-                plans[i] = p
-                metas[i]["plan"] = logger.try_parse_json(p) or p
-
-        # ---------------------------
-        # FINAL stage + retries
-        # ---------------------------
-        outputs: List[str] = [""] * n
-        used_fallback: List[bool] = [False] * n
-        last_before_fallback: List[str] = [""] * n
-        ever_failed: set[int] = set()
-
-        def generate_final(batch_ids: List[int], decode: DecodeConfig) -> None:
-            batch_texts: List[str] = []
-            for i in batch_ids:
-                msgs = self._build_final_messages(df, i, mode=mode, plan_json=plans[i])
-                batch_texts.append(to_chat_text(tokenizer, msgs))
-            batch_out = generate_batch_once(model, tokenizer, batch_texts, decode)
-            for local, i in enumerate(batch_ids):
-                out = normalize_one_line(batch_out[local])
-                outputs[i] = out
-                last_before_fallback[i] = out
-
-        for batch_ids in batched(indices, self.cfg.batch_size):
-            generate_final(batch_ids, self.cfg.final_decode)
-
-        bad_indices = [i for i in indices if not self._is_good(df, i, mode=mode, out=outputs[i])]
-        ever_failed.update(bad_indices)
-
-        for retry_round in range(1, self.cfg.max_retries + 1):
-            if not bad_indices:
-                break
-
-            step = self.cfg.retry_steps[(retry_round - 1) % len(self.cfg.retry_steps)]
-            decode = DecodeConfig(
-                max_new_tokens=step.max_new_tokens,
-                min_new_tokens=max(6, self.cfg.final_decode.min_new_tokens),
-                temperature=step.temperature,
-                top_p=step.top_p,
+        try:
+            logger.log_run_meta(
+                {
+                    "task": self.cfg.task,
+                    "mode": mode,
+                    "base_model_id": self.cfg.base_model_id,
+                    "lora_adapter_path": self.cfg.lora_adapter_path,
+                    "input_path": str(self.cfg.input_path),
+                    "output_dir": str(self.cfg.output_dir),
+                    "output_filename": self.cfg.output_filename,
+                    "batch_size": self.cfg.batch_size,
+                    "caption_max_words": self.cfg.caption_max_words,
+                    "scenes_output_csv": str(self.cfg.scenes_output_csv) if self.cfg.scenes_output_csv else None,
+                    "vl_scene_extractor_module": self.cfg.vl_scene_extractor_module,
+                    "vl_force_rerun": self.cfg.vl_force_rerun,
+                }
             )
 
-            # Switch humor type on retry (config driven), then replan, then regenerate
-            for i in bad_indices:
-                humor_types[i] = self._maybe_switch_humor_on_retry(
-                    mode=mode,
-                    current=humor_types[i],
-                    retry_round=retry_round,
-                    image_facts=str(df.loc[i, "image_facts"]) if mode.startswith("image_") else "",
-                    noun1=str(df.loc[i, "noun1"]) if mode.startswith("image_") else "",
-                    noun2=str(df.loc[i, "noun2"]) if mode.startswith("image_") else "",
-                )
-                metas[i]["humor_type"] = humor_types[i]
+            model, tokenizer = load_model_and_tokenizer(self.cfg.base_model_id, self.cfg.lora_adapter_path)
 
-            # replan
-            for batch_ids in batched(bad_indices, self.cfg.batch_size):
+            # Decide humor type per row
+            metas: List[Dict[str, Any]] = []
+            humor_types: List[HumorType] = [""] * n
+
+            for i in range(n):
+                meta: Dict[str, Any] = {"mode": mode, "humor_type": "", "headline": None, "plan": None}
+
+                if mode == "two_words":
+                    ht = self._choose_humor_for_two_words()
+                elif mode == "headline":
+                    ht = self._choose_humor_for_headline(str(df.loc[i, "headline"]))
+                    meta["headline"] = str(df.loc[i, "headline"])
+                elif mode in {"image_caption_b1", "image_caption_b2"}:
+                    ht = self._choose_humor_for_image(
+                        str(df.loc[i, "image_facts"]), str(df.loc[i, "noun1"]), str(df.loc[i, "noun2"])
+                    )
+                else:
+                    ht = "irony"
+
+                humor_types[i] = ht
+                meta["humor_type"] = ht
+                metas.append(meta)
+
+            # ---------------------------
+            # PLAN stage
+            # ---------------------------
+            plans: List[str] = [""] * n
+
+            print(f"[{_ts()}] PLAN stage started: {n} rows, batch size {self.cfg.batch_size}, {total_batches} batches")
+
+            batch_no = 0
+            for batch_ids in batched(indices, self.cfg.batch_size):
+                batch_no += 1
+                t0 = time.perf_counter()
+
+                print(f"[{_ts()}] PLAN batch {batch_no}/{total_batches} started (size={len(batch_ids)})")
+
                 batch_texts: List[str] = []
                 for i in batch_ids:
                     msgs = self._build_plan_messages(df, i, mode=mode, humor_type=humor_types[i])
                     batch_texts.append(to_chat_text(tokenizer, msgs))
+
                 batch_out = generate_batch_once(model, tokenizer, batch_texts, self.cfg.plan_decode)
+
                 for local, i in enumerate(batch_ids):
                     p = normalize_one_line(batch_out[local])
-                    if p:
-                        plans[i] = p
-                        metas[i]["plan"] = logger.try_parse_json(p) or p
+                    if not p:
+                        p = self._fallback_plan(df, i, mode=mode, humor_type=humor_types[i])
+                    plans[i] = p
+                    metas[i]["plan"] = logger.try_parse_json(p) or p
 
-            # final
-            for batch_ids in batched(bad_indices, self.cfg.batch_size):
-                generate_final(batch_ids, decode)
+                dt = time.perf_counter() - t0
+                print(f"[{_ts()}] PLAN batch {batch_no}/{total_batches} done in {_fmt_seconds(dt)}")
 
-            bad_indices = [i for i in bad_indices if not self._is_good(df, i, mode=mode, out=outputs[i])]
+                logger.log_batch_timing(
+                    stage="plan",
+                    batch_index=batch_no,
+                    batch_size=len(batch_ids),
+                    seconds=dt,
+                    extra={"decode": asdict(self.cfg.plan_decode)},
+                )
+
+                first_i = batch_ids[0]
+                logger.log_first_in_batch(
+                    stage="plan",
+                    batch_index=batch_no,
+                    batch_size=len(batch_ids),
+                    example_index=int(first_i),
+                    chat_text=batch_texts[0],
+                    model_output=str(plans[first_i]),
+                    meta=metas[first_i],
+                    note="first example in plan batch",
+                )
+
+            # ---------------------------
+            # FINAL stage + retries
+            # ---------------------------
+            outputs: List[str] = [""] * n
+            used_fallback: List[bool] = [False] * n
+            last_before_fallback: List[str] = [""] * n
+            ever_failed: set[int] = set()
+
+            def generate_final_batch(batch_ids: List[int], decode: DecodeConfig) -> Tuple[List[str], List[str]]:
+                batch_texts: List[str] = []
+                for i in batch_ids:
+                    msgs = self._build_final_messages(df, i, mode=mode, plan_json=plans[i])
+                    batch_texts.append(to_chat_text(tokenizer, msgs))
+                batch_out = generate_batch_once(model, tokenizer, batch_texts, decode)
+                for local, i in enumerate(batch_ids):
+                    out = normalize_one_line(batch_out[local])
+                    outputs[i] = out
+                    last_before_fallback[i] = out
+                return batch_texts, batch_out
+
+            print(f"[{_ts()}] FINAL stage started: {n} rows, batch size {self.cfg.batch_size}, {total_batches} batches")
+
+            batch_no = 0
+            for batch_ids in batched(indices, self.cfg.batch_size):
+                batch_no += 1
+                t0 = time.perf_counter()
+
+                print(f"[{_ts()}] FINAL batch {batch_no}/{total_batches} started (size={len(batch_ids)})")
+
+                batch_texts, _ = generate_final_batch(batch_ids, self.cfg.final_decode)
+
+                dt = time.perf_counter() - t0
+                print(f"[{_ts()}] FINAL batch {batch_no}/{total_batches} done in {_fmt_seconds(dt)}")
+
+                logger.log_batch_timing(
+                    stage="final",
+                    batch_index=batch_no,
+                    batch_size=len(batch_ids),
+                    seconds=dt,
+                    extra={"decode": asdict(self.cfg.final_decode)},
+                )
+
+                first_i = batch_ids[0]
+                logger.log_first_in_batch(
+                    stage="final",
+                    batch_index=batch_no,
+                    batch_size=len(batch_ids),
+                    example_index=int(first_i),
+                    chat_text=batch_texts[0],
+                    model_output=str(outputs[first_i]),
+                    meta=metas[first_i],
+                    note="first example in final batch",
+                )
+
+            bad_indices = [i for i in indices if not self._is_good(df, i, mode=mode, out=outputs[i])]
             ever_failed.update(bad_indices)
+            print(f"[{_ts()}] Initial bad rows: {len(bad_indices)}")
 
-        if bad_indices:
-            for i in bad_indices:
-                used_fallback[i] = True
-                outputs[i] = self._fallback_output(df, i, mode=mode)
+            for retry_round in range(1, self.cfg.max_retries + 1):
+                if not bad_indices:
+                    break
 
-        # ---------------------------
-        # Save predictions
-        # ---------------------------
-        out_df = df.copy()
-        if "id" not in out_df.columns:
-            out_df.insert(0, "id", [str(i) for i in range(len(out_df))])
+                step = self.cfg.retry_steps[(retry_round - 1) % len(self.cfg.retry_steps)]
+                decode = DecodeConfig(
+                    max_new_tokens=step.max_new_tokens,
+                    min_new_tokens=max(6, self.cfg.final_decode.min_new_tokens),
+                    temperature=step.temperature,
+                    top_p=step.top_p,
+                )
 
-        # REQUIRED: humor_type column
-        out_df["humor_type"] = humor_types
-        out_df["prediction"] = outputs
+                print(f"[{_ts()}] RETRY round {retry_round} started: {len(bad_indices)} bad rows")
+                logger.log_event(
+                    "retry_round_start",
+                    {
+                        "retry_round": int(retry_round),
+                        "bad_count": int(len(bad_indices)),
+                        "decode_step": asdict(step),
+                    },
+                )
 
-        out_df.to_csv(out_path, sep="\t", index=False)
+                # Switch humor type on retry (config driven), then replan, then regenerate
+                for i in bad_indices:
+                    humor_types[i] = self._maybe_switch_humor_on_retry(
+                        mode=mode,
+                        current=humor_types[i],
+                        retry_round=retry_round,
+                        image_facts=str(df.loc[i, "image_facts"]) if mode.startswith("image_") else "",
+                        noun1=str(df.loc[i, "noun1"]) if mode.startswith("image_") else "",
+                        noun2=str(df.loc[i, "noun2"]) if mode.startswith("image_") else "",
+                    )
+                    metas[i]["humor_type"] = humor_types[i]
 
-        zip_path = zip_file(out_path)
-        logger.log_run_end(
-            {
-                "rows": n,
-                "ever_failed_count": len(ever_failed),
-                "fallback_count": int(sum(1 for x in used_fallback if x)),
-                "zip_path": str(zip_path),
-                "log_path": str(log_path),
-            }
-        )
-        logger.close()
+                # ---------- REPLAN ----------
+                retry_total_batches = (len(bad_indices) + self.cfg.batch_size - 1) // self.cfg.batch_size
+                print(f"[{_ts()}] RETRY {retry_round}: REPLAN started ({retry_total_batches} batches)")
 
-        copy_outputs_to_drive([zip_path, log_path], self.cfg.drive_output_dir)
-        print("Done.")
+                rb = 0
+                for batch_ids in batched(bad_indices, self.cfg.batch_size):
+                    rb += 1
+                    t0 = time.perf_counter()
+
+                    batch_texts: List[str] = []
+                    for i in batch_ids:
+                        msgs = self._build_plan_messages(df, i, mode=mode, humor_type=humor_types[i])
+                        batch_texts.append(to_chat_text(tokenizer, msgs))
+
+                    batch_out = generate_batch_once(model, tokenizer, batch_texts, self.cfg.plan_decode)
+
+                    for local, i in enumerate(batch_ids):
+                        p = normalize_one_line(batch_out[local])
+                        if p:
+                            plans[i] = p
+                            metas[i]["plan"] = logger.try_parse_json(p) or p
+
+                    dt = time.perf_counter() - t0
+                    print(f"[{_ts()}] RETRY {retry_round}: REPLAN batch {rb}/{retry_total_batches} done in {_fmt_seconds(dt)}")
+
+                    logger.log_batch_timing(
+                        stage=f"retry_{retry_round}_plan",
+                        batch_index=rb,
+                        batch_size=len(batch_ids),
+                        seconds=dt,
+                        extra={"decode": asdict(self.cfg.plan_decode), "retry_round": int(retry_round)},
+                    )
+
+                    first_i = batch_ids[0]
+                    logger.log_first_in_batch(
+                        stage=f"retry_{retry_round}_plan",
+                        batch_index=rb,
+                        batch_size=len(batch_ids),
+                        example_index=int(first_i),
+                        chat_text=batch_texts[0],
+                        model_output=str(plans[first_i]),
+                        meta=metas[first_i],
+                        note=f"first example in retry {retry_round} plan batch",
+                    )
+
+                # ---------- FINAL (retry) ----------
+                print(f"[{_ts()}] RETRY {retry_round}: FINAL started ({retry_total_batches} batches)")
+
+                rb = 0
+                for batch_ids in batched(bad_indices, self.cfg.batch_size):
+                    rb += 1
+                    t0 = time.perf_counter()
+
+                    batch_texts, _ = generate_final_batch(batch_ids, decode)
+
+                    dt = time.perf_counter() - t0
+                    print(f"[{_ts()}] RETRY {retry_round}: FINAL batch {rb}/{retry_total_batches} done in {_fmt_seconds(dt)}")
+
+                    logger.log_batch_timing(
+                        stage=f"retry_{retry_round}_final",
+                        batch_index=rb,
+                        batch_size=len(batch_ids),
+                        seconds=dt,
+                        extra={"decode": asdict(decode), "retry_round": int(retry_round)},
+                    )
+
+                    first_i = batch_ids[0]
+                    logger.log_first_in_batch(
+                        stage=f"retry_{retry_round}_final",
+                        batch_index=rb,
+                        batch_size=len(batch_ids),
+                        example_index=int(first_i),
+                        chat_text=batch_texts[0],
+                        model_output=str(outputs[first_i]),
+                        meta=metas[first_i],
+                        note=f"first example in retry {retry_round} final batch",
+                    )
+
+                bad_indices = [i for i in bad_indices if not self._is_good(df, i, mode=mode, out=outputs[i])]
+                ever_failed.update(bad_indices)
+
+                print(f"[{_ts()}] RETRY round {retry_round} done: remaining bad rows {len(bad_indices)}")
+                logger.log_event(
+                    "retry_round_end",
+                    {
+                        "retry_round": int(retry_round),
+                        "remaining_bad_count": int(len(bad_indices)),
+                    },
+                )
+
+            if bad_indices:
+                for i in bad_indices:
+                    used_fallback[i] = True
+                    outputs[i] = self._fallback_output(df, i, mode=mode)
+
+                logger.log_fallback_predictions(
+                    [{"index": int(i), "mode": mode, "humor_type": humor_types[i]} for i in bad_indices]
+                )
+
+            # ---------------------------
+            # Save predictions
+            # ---------------------------
+            out_df = df.copy()
+            if "id" not in out_df.columns:
+                out_df.insert(0, "id", [str(i) for i in range(len(out_df))])
+
+            # REQUIRED: humor_type column
+            out_df["humor_type"] = humor_types
+            out_df["prediction"] = outputs
+
+            out_df.to_csv(out_path, sep="\t", index=False)
+
+            zip_path = zip_file(out_path)
+            logger.log_run_end(
+                {
+                    "rows": n,
+                    "ever_failed_count": len(ever_failed),
+                    "fallback_count": int(sum(1 for x in used_fallback if x)),
+                    "zip_path": str(zip_path),
+                    "log_path": str(log_path),
+                }
+            )
+
+            copy_outputs_to_drive([zip_path, log_path], self.cfg.drive_output_dir)
+            print(f"[{_ts()}] Done. Saved: {zip_path} and {log_path}")
+
+        finally:
+            # Always persist logs even if something errors mid-run
+            try:
+                logger.close()
+            except Exception:
+                pass
 
 
 # =============================================================================
