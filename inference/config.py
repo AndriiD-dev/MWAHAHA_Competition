@@ -166,10 +166,34 @@ class PromptTexts:
         "You are a humor generation assistant. Follow instructions exactly. Output only the final required answer. One line. No extra text, no markdown."
     )
     two_words_pun_plan_task: str = (
-        "### Pun and wordplay\n"
-        "Definition: lexical pivot supports two readings; punchline forces the hidden one. Not irony or satire: language mechanics.\n"
+        "### Pun\n"
+        "Definition: a lexical pivot supports two readings; punchline forces the hidden reading. Not irony/satire.\n"
         "Inputs: mode=two_words; nouns=[noun1,noun2] exact; contexts in FACTS.\n"
-        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences).\n"
+        "Return ONE LINE JavaScript Object Notation only. No extra keys. No trailing text. Keep phrases short.\n"
+        "\n"
+        "STRICT FORMAT:\n"
+        "- Must match Schema exactly; never rename/omit keys.\n"
+        "- If unsure: use empty list/string but keep the key.\n"
+        "- noun_terms keys MUST be noun1_terms and noun2_terms (never literal nouns).\n"
+        "\n"
+        "TERM RULES:\n"
+        "- noun_terms are nouns / noun phrases only.\n"
+        "- shared_terms are overlap/search seeds only (0-4).\n"
+        "- Forbidden filler tokens anywhere: thing, stuff, someone, anyone, everyone, person, people, object, item, product, something, anything, everything.\n"
+        "- Avoid proper nouns unless the noun itself is a proper noun.\n"
+        "\n"
+        "PIVOT VALIDITY (critical):\n"
+        "- pivot_candidates length 3-8.\n"
+        "- A pivot is valid ONLY if dual_readings are clearly different:\n"
+        "  (A) polysemy (chair=furniture/leader), (B) idiom vs literal (up to something), or (C) sound/segmentation (Hungary=hungry).\n"
+        "- At least ONE candidate must be (A) using noun1 or noun2.\n"
+        "- link must mention how noun/topic cues hidden meaning and how pivot connects both.\n"
+        "- Do NOT use noun1+noun2 concatenations unless (C) yields two real readings.\n"
+        "\n"
+        "PUN CORE:\n"
+        "- combination_proposition must state: surface intent + hidden hook + pivot requirement.\n"
+        "- inferred_setup_candidates are surface frames; hidden_setup_candidates are topic cues (nouns/domain).\n"
+        "\n"
         "Schema:\n"
         '{"humor_type":"pun","mode":"two_words","nouns":["<noun1>","<noun2>"],'
         '"noun_terms":{"noun1_terms":[...],"noun2_terms":[...]},'
@@ -177,7 +201,7 @@ class PromptTexts:
         '"pivot_candidates":[{"pivot":"...","dual_readings":["surface","hidden"],"link":"..."}],'
         '"pun_core":{"combination_proposition":"...","inferred_setup_candidates":[...],"hidden_setup_candidates":[...]},'
         '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
-        "Sizes: noun_terms 5-10 each; shared_terms 0-4; pivot_candidates 5-8; inferred_setup 2-5; hidden_setup 2-4.\n"
+        "Minimum sizes: noun_terms 6-10 each; inferred_setup 2-5; hidden_setup 2-4.\n"
     )
 
     caption_mm_b1_pun_plan_task: str = (
@@ -228,10 +252,29 @@ class PromptTexts:
 
     two_words_irony_plan_task: str = (
         "### Irony\n"
-        "Definition: intent mismatch (said ≠ meant), e.g., praise for something clearly bad or calm understatement for something annoying.\n"
-        "Not pun or satire: no wordplay pivot needed; no public target or mock-news voice required.\n"
+        "Definition: intent mismatch (said ≠ meant), usually exaggerated praise or calm positivity about something clearly bad/annoying.\n"
+        "Not pun/satire: no lexical pivot required; no mock-news voice.\n"
         "Inputs: mode=two_words; nouns=[noun1,noun2] exact; contexts in FACTS.\n"
-        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences), except everyday_knowledge.\n"
+        "Return ONE LINE JavaScript Object Notation only. No extra keys. No trailing text.\n"
+        "\n"
+        "STRICT FORMAT:\n"
+        "- Must match Schema exactly; never rename/omit keys.\n"
+        "- If unsure: use empty list/string but keep the key.\n"
+        "- everyday_knowledge MUST be a list of STRINGS (not objects), 1 short sentence each.\n"
+        "\n"
+        "QUALITY RULES:\n"
+        "- No proper nouns / specific real-world entities unless the noun itself is one.\n"
+        "- Avoid filler tokens: thing, stuff, someone, anyone, everyone, person, people, object, item, product, something, anything, everything.\n"
+        "- Keep candidates as short phrases (not full sentences), except everyday_knowledge.\n"
+        "\n"
+        "IRONY LOGIC (critical):\n"
+        "- Construct: situation (contains both nouns) → negative reality (bad/annoying) → positive utterance (praise/enthusiasm/politeness) that clearly contradicts it.\n"
+        "- situation_candidates (2-3): daily-life plausible; each should include BOTH nouns or make co-occurrence obvious.\n"
+        "- negative_reality_candidates (2-3): direct consequence of the situation.\n"
+        "- positive_utterance_candidates (2-3): clearly positive cue phrases (e.g., 'oh great', 'my favorite', 'love that', 'so relaxing').\n"
+        "- everyday_knowledge (2-4): generic common-sense support that explains why the praise implies complaint.\n"
+        "- irony_core.combination_proposition: 0-1 short sentence summarizing the mismatch (negative reality + positive utterance ⇒ implied complaint).\n"
+        "\n"
         "Schema:\n"
         '{"humor_type":"irony","mode":"two_words","nouns":["<noun1>","<noun2>"],'
         '"derived_situation":{"domain":"daily life|work/school|services|home|health/energy",'
@@ -239,7 +282,7 @@ class PromptTexts:
         '"everyday_knowledge":[...],'
         '"irony_core":{"combination_proposition":"..."},'
         '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
-        "Sizes: situation_candidates 2-3; negative_reality_candidates 2-3; positive_utterance_candidates 2-3; everyday_knowledge 2-4 (1 sentence each); combination_proposition 0-1 (1 sentence).\n"
+        "Sizes: situation 2-3; negative 2-3; positive 2-3; everyday 2-4; proposition 0-1.\n"
     )
 
     headline_irony_plan_task: str = (
