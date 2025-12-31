@@ -13,8 +13,8 @@ RUNNER_CONFIG = {
     "batch_size": 16,
 
     "plan_decode": {
-        "max_new_tokens": 72,
-        "min_new_tokens": 16,
+        "max_new_tokens": 180,
+        "min_new_tokens": 64,
         "temperature": 0.4,
         "top_p": 0.9,
     },
