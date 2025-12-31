@@ -871,12 +871,12 @@ class InferenceRunner:
                 metas[i]["plan"] = logger.try_parse_json(p) or p
 
             t_batch1 = time.time()
-            logger.log_batch_timing(
-                stage="plan",
-                batch_index=batch_index,
-                batch_size=len(batch_ids),
-                seconds=t_batch1 - t_batch0,
-            )
+            # logger.log_batch_timing(
+            #     stage="plan",
+            #     batch_index=batch_index,
+            #     batch_size=len(batch_ids),
+            #     seconds=t_batch1 - t_batch0,
+            # )
             print(f"[PLAN] batch={batch_index} size={len(batch_ids)} seconds={t_batch1 - t_batch0:.2f}")
 
         # ---------------------------
@@ -925,13 +925,13 @@ class InferenceRunner:
 
             t_batch1 = time.time()
             extra = {"retry_round": retry_round} if retry_round is not None else {}
-            logger.log_batch_timing(
-                stage=stage,
-                batch_index=batch_index,
-                batch_size=len(batch_ids),
-                seconds=t_batch1 - t_batch0,
-                extra=extra,
-            )
+            # logger.log_batch_timing(
+            #     stage=stage,
+            #     batch_index=batch_index,
+            #     batch_size=len(batch_ids),
+            #     seconds=t_batch1 - t_batch0,
+            #     extra=extra,
+            # )
             rr = f" retry_round={retry_round}" if retry_round is not None else ""
             print(f"[{stage.upper()}]{rr} batch={batch_index} size={len(batch_ids)} seconds={t_batch1 - t_batch0:.2f}")
 
@@ -986,13 +986,13 @@ class InferenceRunner:
                         metas[i]["plan"] = logger.try_parse_json(p) or p
 
                 t_batch1 = time.time()
-                logger.log_batch_timing(
-                    stage="replan",
-                    batch_index=batch_index,
-                    batch_size=len(batch_ids),
-                    seconds=t_batch1 - t_batch0,
-                    extra={"retry_round": retry_round, "bad_count": len(bad_indices)},
-                )
+                # logger.log_batch_timing(
+                #     stage="replan",
+                #     batch_index=batch_index,
+                #     batch_size=len(batch_ids),
+                #     seconds=t_batch1 - t_batch0,
+                #     extra={"retry_round": retry_round, "bad_count": len(bad_indices)},
+                # )
                 print(f"[REPLAN] retry_round={retry_round} batch={batch_index} size={len(batch_ids)} seconds={t_batch1 - t_batch0:.2f}")
 
             # final regeneration for those bad examples
