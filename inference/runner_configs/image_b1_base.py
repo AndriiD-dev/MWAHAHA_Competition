@@ -6,7 +6,8 @@ RUNNER_CONFIG = {
     "lora_adapter_path": None,
 
     # Input is a tab separated values file with at least: id, url (or gif_url / gif_path)
-    "input_path": Path("data/task-b1.tsv"),
+    #"input_path": Path("data/task-b1.tsv"),
+    "input_path": Path("data/test_subsets/task-b1.test100.csv"),
     "output_dir": Path("outputs"),
     "output_filename": "task-b1_predictions_base.tsv",
     "drive_output_dir": "MyDrive/MWAHAHA_Competition/outputs",

@@ -5,7 +5,8 @@ RUNNER_CONFIG = {
     "base_model_id": "Qwen/Qwen2.5-3B-Instruct",
     "lora_adapter_path": None,
 
-    "input_path": Path("data/task-a-two-words.csv"),
+    #"input_path": Path("data/task-a-two-words.csv"),
+    "input_path": Path("data/test_subsets/task-a-two-words.test100.csv"),
     "output_dir": Path("outputs"),
     "output_filename": "task-a-two-words_predictions_base.tsv",
     "drive_output_dir": "MyDrive/MWAHAHA_Competition/outputs",
