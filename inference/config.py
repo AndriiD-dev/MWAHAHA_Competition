@@ -97,19 +97,19 @@ class SpacySettings:
     phrase_allowed_chars_pattern: str = r"[^A-Za-z0-9 \-']"
 
     # --- New: stricter "clean noun" controls ---
-    strip_leading_determiners: bool = True              # the/a/an/this/that/these/those
-    strip_leading_possessives: bool = True              # my/your/his/her/our/their/its
-    strip_leading_slang_possessives: bool = True        # me/ma (joke corpora often uses these)
-    split_camelcase: bool = True                        # familyMom -> family Mom
+    strip_leading_determiners: bool = True  # the/a/an/this/that/these/those
+    strip_leading_possessives: bool = True  # my/your/his/her/our/their/its
+    strip_leading_slang_possessives: bool = True  # me/ma (joke corpora often uses these)
+    split_camelcase: bool = True  # familyMom -> family Mom
 
     # Hyphens and digits
-    split_hyphens_to_space: bool = True                 # x-ray -> x ray, -year-old -> year old
-    reject_if_contains_digit: bool = True               # 3 wise men, 50 shades, etc.
-    reject_if_starts_with_punct: bool = True            # -You'll
+    split_hyphens_to_space: bool = True  # x-ray -> x ray, -year-old -> year old
+    reject_if_contains_digit: bool = True  # 3 wise men, 50 shades, etc.
+    reject_if_starts_with_punct: bool = True  # -You'll
 
     # Enforce tokens are "word-ish"
-    require_alpha_tokens_only: bool = True              # after stripping apostrophes: only letters in each token
-    reject_contraction_like: bool = True                # You'll, I'm, we're, etc.
+    require_alpha_tokens_only: bool = True  # after stripping apostrophes: only letters in each token
+    reject_contraction_like: bool = True  # You'll, I'm, we're, etc.
 
     # Normalization preference for Wikipedia: use lemma for common nouns
     use_lemma_for_common_nouns: bool = True
@@ -146,10 +146,9 @@ class RequiredWordsSettings:
     allow_possessive: bool = True  # 's, ’s, s', s’
 
     # Weaker matching options
-    allow_singular_from_plural: bool = True   # "eggs" anchor will also accept "egg"
-    allow_verb_ed: bool = True                # "spray" anchor will also accept "sprayed"
-    allow_verb_ing: bool = True               # "spray" anchor will also accept "spraying"
-    
+    allow_singular_from_plural: bool = True  # "eggs" anchor will also accept "egg"
+    allow_verb_ed: bool = True  # "spray" anchor will also accept "sprayed"
+    allow_verb_ing: bool = True  # "spray" anchor will also accept "spraying"
 
 
 # =============================================================================
@@ -246,17 +245,24 @@ class PromptTexts:
 
     caption_mm_b2_pun_plan_task: str = (
         "### Pun and wordplay\n"
-        "Definition: lexical pivot supports two readings; punchline forces the hidden one. Not irony or satire: language mechanics.\n"
-        "Inputs: mode=image_caption_b2; image_facts present; prompt_text provided; complete prompt_text with humorous content; pick nouns as two concrete visible nouns.\n"
-        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences).\n"
+        "Definition: a lexical pivot supports two readings; punchline reveals the hidden one.\n"
+        "Inputs: mode=image_caption_b2; IMAGE_FACTS and PROMPT_TEXT are provided above.\n"
+        "Task: pick ONE funny completion for the blank in PROMPT_TEXT that fits IMAGE_FACTS.\n"
+        "Return ONE LINE JSON only. No markdown. No extra keys.\n"
         "Schema:\n"
-        '{"humor_type":"pun","mode":"image_caption_b2","max_words":20,"prompt_text":"<prompt_text>","nouns":["<noun1>","<noun2>"],'
-        '"noun_terms":{"noun1_terms":[...],"noun2_terms":[...]},'
-        '"shared_terms":[...],'
+        '{"humor_type":"pun","mode":"image_caption_b2","max_words":20,'
+        '"prompt_prefix":"<prompt_prefix>",'
+        '"slot_type":"noun_phrase|verb_phrase|clause",'
+        '"image_hooks":[...],'
         '"pivot_candidates":[{"pivot":"...","dual_readings":["surface","hidden"],"link":"..."}],'
-        '"pun_core":{"headline_knowledge":[...],"combination_proposition":"...","inferred_setup_candidates":[...],"hidden_setup_candidates":[...]},'
-        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
-        "Sizes: noun_terms 5-8 each; shared_terms 0-4; pivot_candidates 5-7; headline_knowledge 0-2; inferred_setup 2-4; hidden_setup 2-4. Must support final completion <= 20 words total.\n"
+        '"candidates":[...],'
+        '"best":"..."}\n'
+        "Rules:\n"
+        "- prompt_prefix: PROMPT_TEXT up to the blank (no underscores).\n"
+        "- image_hooks: 2-4 short cues grounded in IMAGE_FACTS (objects/action/text/mood).\n"
+        "- pivot_candidates: 2-4 options; dual_readings must be clearly different.\n"
+        "- candidates: 4-6 short fill options (no underscores), each fits after prompt_prefix.\n"
+        "- best: one of candidates; keep it short so total stays <= 20 words.\n"
     )
 
     headline_satire_plan_task: str = (
@@ -369,18 +375,27 @@ class PromptTexts:
 
     caption_mm_b2_irony_plan_task: str = (
         "### Irony\n"
-        "Definition: intent mismatch (said ≠ meant), e.g., praise for something clearly bad or calm understatement for something annoying.\n"
-        "Not pun or satire: no wordplay pivot needed; no public target or mock-news voice required.\n"
-        "Inputs: mode=image_caption_b2; image_facts present; prompt_text provided; complete prompt_text with humorous content; pick nouns as two concrete visible nouns.\n"
-        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences), except everyday_knowledge.\n"
+        "Definition: intent mismatch (said ≠ meant), for example calm praise for something clearly bad/awkward.\n"
+        "Not pun or satire.\n"
+        "Inputs: mode=image_caption_b2; IMAGE_FACTS and PROMPT_TEXT are provided above.\n"
+        "Task: pick ONE ironic completion for the blank in PROMPT_TEXT that fits IMAGE_FACTS.\n"
+        "Return ONE LINE JSON only. No markdown. No extra keys.\n"
         "Schema:\n"
-        '{"humor_type":"irony","mode":"image_caption_b2","max_words":20,"prompt_text":"<prompt_text>","nouns":["<noun1>","<noun2>"],'
-        '"derived_situation":{"domain":"daily life|work/school|services|home|health/energy",'
-        '"situation_candidates":[...],"negative_reality_candidates":[...],"positive_utterance_candidates":[...]},'
-        '"everyday_knowledge":[...],'
-        '"irony_core":{"combination_proposition":"..."},'
-        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
-        "Sizes: situation_candidates 2-3; negative_reality_candidates 2-3; positive_utterance_candidates 2-3; everyday_knowledge 2-4 (1 sentence each); combination_proposition 0-1 (1 sentence). Must support final completion <= 20 words total.\n"
+        '{"humor_type":"irony","mode":"image_caption_b2","max_words":20,'
+        '"prompt_prefix":"<prompt_prefix>",'
+        '"slot_type":"noun_phrase|verb_phrase|clause",'
+        '"image_hooks":[...],'
+        '"negative_reality":"...",'
+        '"positive_utterance":"...",'
+        '"candidates":[...],'
+        '"best":"..."}\n'
+        "Rules:\n"
+        "- prompt_prefix: PROMPT_TEXT up to the blank (no underscores).\n"
+        "- image_hooks: 2-4 short cues grounded in IMAGE_FACTS.\n"
+        "- negative_reality: 3-10 words describing what is actually going wrong.\n"
+        "- positive_utterance: 2-8 words that contradict negative_reality.\n"
+        "- candidates: 4-6 short fill options (no underscores), each fits after prompt_prefix.\n"
+        "- best: one of candidates; keep it short so total stays <= 20 words.\n"
     )
 
     two_words_final_task: str = (
@@ -406,11 +421,12 @@ class PromptTexts:
     )
 
     caption_mm_b2_final_task: str = (
-        "Complete PROMPT_TEXT in English using the GIF. Output must start with PROMPT_TEXT exactly.\n"
-        "One line only. Max 20 words total (including PROMPT_TEXT).\n"
-        "Follow PLAN strictly (humor_type + candidates). No explanation.\n"
-        "PROMPT_TEXT: {prompt_text}\n"
-        "IMAGE_FACTS: {image_facts}\n"
+        "Complete the text prompt in English using the GIF. One line only. Max 20 words total.\n"
+        "Output must start with PROMPT_PREFIX exactly. Do NOT output underscores.\n"
+        "Follow PLAN strictly (use PLAN.best unless you must shorten). No explanation.\n"
+        "PROMPT_RAW: {headline}\n"
+        "PROMPT_PREFIX: {prompt_text}\n"
+        "IMAGE_FACTS_RAW: {image_facts}\n"
         "PLAN: {plan}\n"
     )
 
@@ -436,6 +452,7 @@ class MicrocardSettings:
         "is", "are", "was", "were", "be", "been", "being",
         "it", "its", "this", "that", "these", "those",
     })
+
 
 # =============================================================================
 # Vision-language scene extraction settings
@@ -509,7 +526,6 @@ class VLSceneExtractorSettings:
     )
 
 
-
 # =============================================================================
 # Top-level config object
 # =============================================================================
@@ -538,6 +554,7 @@ class PromptBuilderConfig:
     extra_stopwords: FrozenSet[str] = frozenset({
         "yeah", "okay", "ok", "lol",
     })
+
 
 @dataclass(frozen=True)
 class ResponseEvaluatorConfig:

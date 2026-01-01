@@ -15,13 +15,14 @@ RUNNER_CONFIG = {
     "scenes_output_csv": Path("data/task-b2.scenes.csv"),
 
     "vl_scene_extractor_module": "inference.utils.vl_scene_extractor",
-    "vl_force_rerun": False,
+    # Set True once after updating the scene extractor / columns, then switch back to False
+    "vl_force_rerun": True,
 
     "batch_size": 16,
     "caption_max_words": 20,
 
     "plan_decode": {
-        "max_new_tokens": 80,
+        "max_new_tokens": 120,
         "min_new_tokens": 16,
         "temperature": 0.4,
         "top_p": 0.9,

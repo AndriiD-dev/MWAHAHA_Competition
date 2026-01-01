@@ -477,6 +477,29 @@ class InferenceRunner:
                 chunks.append(v)
         return " ".join(chunks)
 
+
+    _b2_blank_re = re.compile(r"_{3,}")
+
+    def _split_b2_prompt(self, prompt_raw: str) -> Tuple[str, bool]:
+        """Return (prompt_prefix, has_blank). The prefix is the prompt up to the first blank (underscores)."""
+        raw = normalize_one_line(str(prompt_raw))
+        if not raw:
+            return "", False
+        m = self._b2_blank_re.search(raw)
+        if not m:
+            return raw, False
+        prefix = raw[: m.start()].rstrip()
+        return prefix, True
+
+    def _choose_humor_for_b2(self, image_facts: str, prompt_raw: str) -> HumorType:
+        """B2: no noun anchors. Prefer pun only when text markers are likely; otherwise default image humor."""
+        t = (normalize_one_line(image_facts) + " " + normalize_one_line(prompt_raw)).lower()
+        if any(x in t for x in self.cfg.humor_policy.image_written_markers):
+            return "pun"
+        if any(m in t for m in self.cfg.humor_policy.image_text_markers):
+            return "pun"
+        return self.cfg.humor_policy.default_image
+
     def _pick_two_nouns_from_context(self, text: str) -> Tuple[str, str]:
         extractor = self._ensure_spacy_anchor_extractor()
         cands = extractor.extract_candidates(text)
@@ -733,11 +756,17 @@ class InferenceRunner:
 
             for i in range(len(merged)):
                 row = merged.loc[i]
+
                 plan_text = self._build_image_context_plan(row)
                 plan_ctx.append(plan_text)
 
-                spacy_text = self._build_image_context_for_spacy(row)
-                n1, n2 = self._pick_two_nouns_from_context(spacy_text)
+                if mode == "image_caption_b1":
+                    spacy_text = self._build_image_context_for_spacy(row)
+                    n1, n2 = self._pick_two_nouns_from_context(spacy_text)
+                else:
+                    # Strategy A for B2: no noun sampling / no noun anchoring.
+                    n1, n2 = "", ""
+
                 noun1_list.append(n1)
                 noun2_list.append(n2)
 
@@ -752,6 +781,23 @@ class InferenceRunner:
                 if "prompt_text" not in merged.columns:
                     raise ValueError("Variant two requires column 'prompt' or 'prompt_text'.")
                 merged["prompt_text"] = merged["prompt_text"].fillna("").astype(str)
+
+                # Keep the raw prompt for logging and deterministic checks.
+                merged["prompt_text_raw"] = merged["prompt_text"]
+
+                # For prompting and evaluation we only require the prefix (up to the blank).
+                prefixes: List[str] = []
+                has_blank: List[bool] = []
+                for i in range(len(merged)):
+                    pfx, hb = self._split_b2_prompt(str(merged.loc[i, "prompt_text"]))
+                    prefixes.append(pfx)
+                    has_blank.append(bool(hb))
+
+                merged["prompt_prefix"] = prefixes
+                merged["prompt_has_blank"] = has_blank
+
+                # This is what PromptBuilder will see as PROMPT_TEXT (prefix only).
+                merged["prompt_text"] = merged["prompt_prefix"]
 
             return merged, mode
 
@@ -848,8 +894,9 @@ class InferenceRunner:
                 mode="image_caption_b2",
                 noun1=str(df.loc[i, "noun1"]),
                 noun2=str(df.loc[i, "noun2"]),
+                headline=str(df.loc[i, "prompt_text_raw"]) if "prompt_text_raw" in df.columns else str(df.loc[i, "prompt_text"]),
                 image_facts=str(df.loc[i, "image_facts_raw"]),
-                prompt_text=str(df.loc[i, "prompt_text"]),
+                prompt_text=str(df.loc[i, "prompt_text"]),  # prefix
                 plan_text=plan_json,
             )
         raise ValueError(f"Unsupported mode: {mode}")
@@ -896,8 +943,10 @@ class InferenceRunner:
             return bool(humorous_ok and (self._count_words(out) <= self.cfg.caption_max_words))
 
         if mode == "image_caption_b2":
-            pt = normalize_one_line(str(df.loc[i, "prompt_text"]))
-            if pt and not out.startswith(pt):
+            prefix = normalize_one_line(str(df.loc[i, "prompt_text"]))  # prefix only
+            if prefix and not out.startswith(prefix):
+                return False
+            if "_" in out:
                 return False
             return bool(humorous_ok and (self._count_words(out) <= self.cfg.caption_max_words))
 
@@ -944,8 +993,10 @@ class InferenceRunner:
             return normalize_one_line("Nothing to see here. Absolutely flawless execution.")
 
         if mode == "image_caption_b2":
-            pt = normalize_one_line(str(df.loc[i, "prompt_text"]))
-            out = (pt + " and I still call it a win.") if pt else "This is fine, and I still call it a win."
+            prefix = normalize_one_line(str(df.loc[i, "prompt_text"]))  # prefix only
+            # Safe generic completion (no underscores).
+            completion = "my last shred of patience."
+            out = (prefix + " " + completion).strip() if prefix else ("This is fine, " + completion)
             return " ".join(out.split()[: self.cfg.caption_max_words])
 
         return "Just a joke."
@@ -997,11 +1048,16 @@ class InferenceRunner:
             elif mode == "headline":
                 ht = self._choose_humor_for_headline(str(df.loc[i, "headline"]))
                 meta["headline"] = str(df.loc[i, "headline"])
-            elif mode in {"image_caption_b1", "image_caption_b2"}:
+            elif mode == "image_caption_b1":
                 ht = self._choose_humor_for_image(
                     str(df.loc[i, "image_facts"]),
                     str(df.loc[i, "noun1"]),
                     str(df.loc[i, "noun2"]),
+                )
+            elif mode == "image_caption_b2":
+                ht = self._choose_humor_for_b2(
+                    str(df.loc[i, "image_facts"]),
+                    str(df.loc[i, "prompt_text_raw"]) if "prompt_text_raw" in df.columns else str(df.loc[i, "prompt_text"]),
                 )
             else:
                 ht = "irony"
