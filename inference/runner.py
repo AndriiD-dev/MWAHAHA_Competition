@@ -9,6 +9,7 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 import argparse
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import time
@@ -22,9 +23,11 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from inference.config import PromptBuilderConfig
 from inference.utils.prompt_builder import PromptBuilder, normalize_one_line, safe_word
 from inference.utils.response_evaluator import ResponseEvaluator
 from inference.utils.logger import Logger
+from inference.utils.spacy_extractor import SpacyAnchorExtractor
 
 
 # =============================================================================
@@ -405,10 +408,101 @@ class InferenceRunner:
     builder: PromptBuilder = field(default_factory=PromptBuilder)
     response_evaluator: Optional[ResponseEvaluator] = field(default=None, init=False)
 
+    spacy_anchor_extractor: Optional[SpacyAnchorExtractor] = field(default=None, init=False)
+
     def _ensure_evaluator(self) -> ResponseEvaluator:
         if self.response_evaluator is None:
             self.response_evaluator = ResponseEvaluator()
         return self.response_evaluator
+
+    def _ensure_spacy_anchor_extractor(self) -> SpacyAnchorExtractor:
+        if self.spacy_anchor_extractor is None:
+            cfg = PromptBuilderConfig()
+            self.spacy_anchor_extractor = SpacyAnchorExtractor(
+                settings=cfg.spacy,
+                generic_nouns=set(cfg.generic_nouns),
+                extra_stopwords=set(cfg.extra_stopwords),
+            )
+        return self.spacy_anchor_extractor
+
+    def _build_image_context_plan(self, row: pd.Series) -> str:
+        """Derived image context for planning (Option 1). Kept short and structured."""
+        cfg = PromptBuilderConfig()
+        s = cfg.vl_scene_extractor
+
+        scene = normalize_one_line(str(row.get(s.scene_col, "")))
+        ambience = normalize_one_line(str(row.get(s.ambience_col, "")))
+        written_text = normalize_one_line(str(row.get(s.written_text_col, "")))
+        key_objects = normalize_one_line(str(row.get(s.key_objects_col, "")))
+        actions = normalize_one_line(str(row.get(s.actions_col, "")))
+        setting = normalize_one_line(str(row.get(s.setting_col, "")))
+        camera_style = normalize_one_line(str(row.get(s.camera_style_col, "")))
+
+        parts: List[str] = []
+        if setting:
+            parts.append(f"setting={setting}")
+        if actions:
+            parts.append(f"action={actions}")
+        if key_objects:
+            parts.append(f"objects={key_objects}")
+        if ambience:
+            parts.append(f"ambience={ambience}")
+        if camera_style:
+            parts.append(f"camera={camera_style}")
+        if written_text:
+            parts.append(f"text={written_text}")
+
+        derived = "; ".join(parts) if parts else ""
+        if derived:
+            return f"IMAGE_CONTEXT_RAW: {scene} | DERIVED: {derived}"
+        return f"IMAGE_CONTEXT_RAW: {scene}"
+
+    def _build_image_context_for_spacy(self, row: pd.Series) -> str:
+        """Cleaner context for noun extraction (no tags like IMAGE_CONTEXT_RAW / DERIVED)."""
+        cfg = PromptBuilderConfig()
+        s = cfg.vl_scene_extractor
+
+        chunks: List[str] = []
+        for col in (
+            s.scene_col,
+            s.setting_col,
+            s.actions_col,
+            s.key_objects_col,
+            s.written_text_col,
+            s.ambience_col,
+            s.camera_style_col,
+        ):
+            v = normalize_one_line(str(row.get(col, "")))
+            if v:
+                chunks.append(v)
+        return " ".join(chunks)
+
+    def _pick_two_nouns_from_context(self, text: str) -> Tuple[str, str]:
+        extractor = self._ensure_spacy_anchor_extractor()
+        cands = extractor.extract_candidates(text)
+
+        chosen: List[str] = []
+        chosen_base: set[str] = set()
+
+        for c in cands:
+            cc = safe_word(c)
+            if not cc:
+                continue
+            b = extractor.base_form_for_similarity(cc)
+            if not b:
+                continue
+            if b in chosen_base:
+                continue
+            chosen.append(cc)
+            chosen_base.add(b)
+            if len(chosen) >= 2:
+                break
+
+        if len(chosen) >= 2:
+            return chosen[0], chosen[1]
+        if len(chosen) == 1:
+            return chosen[0], "meme"
+        return "meme", "gif"
 
     def _canonical_mode(self) -> Mode:
         t = (self.cfg.task or "").strip().lower()
@@ -516,10 +610,25 @@ class InferenceRunner:
             except Exception:
                 pass
 
+        # Validate scenes file matches the NEW vision language extractor columns.
         if out_csv.exists() and out_csv.stat().st_size > 0:
             try:
                 tmp = pd.read_csv(out_csv, keep_default_na=False)
-                if {"id", "scene", "noun1", "noun2"}.issubset(set(tmp.columns)):
+
+                cfg = PromptBuilderConfig()
+                s = cfg.vl_scene_extractor
+
+                required = {
+                    "id",
+                    s.scene_col,
+                    s.ambience_col,
+                    s.written_text_col,
+                    s.key_objects_col,
+                    s.actions_col,
+                    s.setting_col,
+                    s.camera_style_col,
+                }
+                if required.issubset(set(tmp.columns)):
                     return out_csv
             except Exception:
                 pass
@@ -584,16 +693,57 @@ class InferenceRunner:
             scenes_csv = self._ensure_scenes_csv(mode=mode)
             scenes = pd.read_csv(scenes_csv, keep_default_na=False)
 
-            need = {"id", "scene", "noun1", "noun2"}
+            cfg = PromptBuilderConfig()
+            s = cfg.vl_scene_extractor
+
+            need = {
+                "id",
+                s.scene_col,
+                s.ambience_col,
+                s.written_text_col,
+                s.key_objects_col,
+                s.actions_col,
+                s.setting_col,
+                s.camera_style_col,
+            }
             missing = need.difference(set(scenes.columns))
             if missing:
                 raise ValueError(f"Scenes file missing columns {sorted(missing)}: {scenes_csv}")
 
-            merged = df.merge(scenes[["id", "scene", "noun1", "noun2"]], on="id", how="left")
-            merged["scene"] = merged["scene"].fillna("").astype(str)
-            merged["noun1"] = merged["noun1"].fillna("").astype(str)
-            merged["noun2"] = merged["noun2"].fillna("").astype(str)
-            merged["image_facts"] = merged["scene"]
+            cols = [
+                "id",
+                s.scene_col,
+                s.ambience_col,
+                s.written_text_col,
+                s.key_objects_col,
+                s.actions_col,
+                s.setting_col,
+                s.camera_style_col,
+            ]
+            merged = df.merge(scenes[cols], on="id", how="left")
+
+            for c in cols[1:]:
+                merged[c] = merged[c].fillna("").astype(str)
+
+            merged["image_facts_raw"] = merged[s.scene_col].fillna("").astype(str)
+
+            plan_ctx: List[str] = []
+            noun1_list: List[str] = []
+            noun2_list: List[str] = []
+
+            for i in range(len(merged)):
+                row = merged.loc[i]
+                plan_text = self._build_image_context_plan(row)
+                plan_ctx.append(plan_text)
+
+                spacy_text = self._build_image_context_for_spacy(row)
+                n1, n2 = self._pick_two_nouns_from_context(spacy_text)
+                noun1_list.append(n1)
+                noun2_list.append(n2)
+
+            merged["image_facts"] = plan_ctx
+            merged["noun1"] = noun1_list
+            merged["noun2"] = noun2_list
 
             if mode == "image_caption_b2":
                 if "prompt_text" not in merged.columns:
@@ -628,22 +778,45 @@ class InferenceRunner:
                 headline=str(df.loc[i, "headline"]),
             )
         if mode == "image_caption_b1":
-            return self.builder.build_plan_messages(
+            img_plan = str(df.loc[i, "image_facts"])
+            msgs = self.builder.build_plan_messages(
                 mode="image_caption_b1",
                 humor_type=humor_type,
                 noun1=str(df.loc[i, "noun1"]),
                 noun2=str(df.loc[i, "noun2"]),
-                image_facts=str(df.loc[i, "image_facts"]),
+                image_facts=img_plan,
             )
+            # If the plan prompt contains literal placeholders, substitute them here.
+            if len(msgs) >= 2 and "content" in msgs[1]:
+                ctx = normalize_one_line(img_plan)
+                if "{image_facts}" in msgs[1]["content"]:
+                    msgs[1]["content"] = re.sub(
+                        r"(^|\n)IMAGE_FACTS:\s*" + re.escape(ctx) + r"(?=\n|$)",
+                        "",
+                        msgs[1]["content"],
+                    )
+                    msgs[1]["content"] = msgs[1]["content"].replace("{image_facts}", ctx)
+            return msgs
         if mode == "image_caption_b2":
-            return self.builder.build_plan_messages(
+            img_plan = str(df.loc[i, "image_facts"])
+            msgs = self.builder.build_plan_messages(
                 mode="image_caption_b2",
                 humor_type=humor_type,
                 noun1=str(df.loc[i, "noun1"]),
                 noun2=str(df.loc[i, "noun2"]),
-                image_facts=str(df.loc[i, "image_facts"]),
+                image_facts=img_plan,
                 prompt_text=str(df.loc[i, "prompt_text"]),
             )
+            if len(msgs) >= 2 and "content" in msgs[1]:
+                ctx = normalize_one_line(img_plan)
+                if "{image_facts}" in msgs[1]["content"]:
+                    msgs[1]["content"] = re.sub(
+                        r"(^|\n)IMAGE_FACTS:\s*" + re.escape(ctx) + r"(?=\n|$)",
+                        "",
+                        msgs[1]["content"],
+                    )
+                    msgs[1]["content"] = msgs[1]["content"].replace("{image_facts}", ctx)
+            return msgs
         raise ValueError(f"Unsupported mode: {mode}")
 
     def _build_final_messages(self, df: pd.DataFrame, i: int, *, mode: Mode, plan_json: str) -> List[Dict[str, str]]:
@@ -667,7 +840,7 @@ class InferenceRunner:
                 mode="image_caption_b1",
                 noun1=str(df.loc[i, "noun1"]),
                 noun2=str(df.loc[i, "noun2"]),
-                image_facts=str(df.loc[i, "image_facts"]),
+                image_facts=str(df.loc[i, "image_facts_raw"]),
                 plan_text=plan_json,
             )
         if mode == "image_caption_b2":
@@ -675,7 +848,7 @@ class InferenceRunner:
                 mode="image_caption_b2",
                 noun1=str(df.loc[i, "noun1"]),
                 noun2=str(df.loc[i, "noun2"]),
-                image_facts=str(df.loc[i, "image_facts"]),
+                image_facts=str(df.loc[i, "image_facts_raw"]),
                 prompt_text=str(df.loc[i, "prompt_text"]),
                 plan_text=plan_json,
             )
@@ -825,7 +998,11 @@ class InferenceRunner:
                 ht = self._choose_humor_for_headline(str(df.loc[i, "headline"]))
                 meta["headline"] = str(df.loc[i, "headline"])
             elif mode in {"image_caption_b1", "image_caption_b2"}:
-                ht = self._choose_humor_for_image(str(df.loc[i, "image_facts"]), str(df.loc[i, "noun1"]), str(df.loc[i, "noun2"]))
+                ht = self._choose_humor_for_image(
+                    str(df.loc[i, "image_facts"]),
+                    str(df.loc[i, "noun1"]),
+                    str(df.loc[i, "noun2"]),
+                )
             else:
                 ht = "irony"
 
@@ -849,7 +1026,6 @@ class InferenceRunner:
 
             batch_out = generate_batch_once(model, tokenizer, batch_texts, self.cfg.plan_decode)
 
-            # Log the first example from the first plan batch (prompt + raw model output)
             if batch_index == 0 and batch_ids:
                 first_i = batch_ids[0]
                 logger.log_first_in_batch(
@@ -871,12 +1047,6 @@ class InferenceRunner:
                 metas[i]["plan"] = logger.try_parse_json(p) or p
 
             t_batch1 = time.time()
-            # logger.log_batch_timing(
-            #     stage="plan",
-            #     batch_index=batch_index,
-            #     batch_size=len(batch_ids),
-            #     seconds=t_batch1 - t_batch0,
-            # )
             print(f"[PLAN] batch={batch_index} size={len(batch_ids)} seconds={t_batch1 - t_batch0:.2f}")
 
         # ---------------------------
@@ -904,7 +1074,6 @@ class InferenceRunner:
 
             batch_out = generate_batch_once(model, tokenizer, batch_texts, decode)
 
-            # Log the first example from the first final batch (prompt + raw model output)
             if stage == "final" and batch_index == 0 and batch_ids:
                 first_i = batch_ids[0]
                 logger.log_first_in_batch(
@@ -924,18 +1093,9 @@ class InferenceRunner:
                 last_before_fallback[i] = out
 
             t_batch1 = time.time()
-            extra = {"retry_round": retry_round} if retry_round is not None else {}
-            # logger.log_batch_timing(
-            #     stage=stage,
-            #     batch_index=batch_index,
-            #     batch_size=len(batch_ids),
-            #     seconds=t_batch1 - t_batch0,
-            #     extra=extra,
-            # )
             rr = f" retry_round={retry_round}" if retry_round is not None else ""
             print(f"[{stage.upper()}]{rr} batch={batch_index} size={len(batch_ids)} seconds={t_batch1 - t_batch0:.2f}")
 
-        # initial final pass
         for batch_index, batch_ids in enumerate(batched(indices, self.cfg.batch_size)):
             generate_final(batch_ids, self.cfg.final_decode, stage="final", batch_index=batch_index)
 
@@ -956,7 +1116,6 @@ class InferenceRunner:
                 top_p=step.top_p,
             )
 
-            # Switch humor type on retry (config driven), then replan, then regenerate
             for i in bad_indices:
                 humor_types[i] = self._maybe_switch_humor_on_retry(
                     mode=mode,
@@ -968,7 +1127,6 @@ class InferenceRunner:
                 )
                 metas[i]["humor_type"] = humor_types[i]
 
-            # replan only for the currently bad examples
             for batch_index, batch_ids in enumerate(batched(bad_indices, self.cfg.batch_size)):
                 t_batch0 = time.time()
 
@@ -986,16 +1144,8 @@ class InferenceRunner:
                         metas[i]["plan"] = logger.try_parse_json(p) or p
 
                 t_batch1 = time.time()
-                # logger.log_batch_timing(
-                #     stage="replan",
-                #     batch_index=batch_index,
-                #     batch_size=len(batch_ids),
-                #     seconds=t_batch1 - t_batch0,
-                #     extra={"retry_round": retry_round, "bad_count": len(bad_indices)},
-                # )
                 print(f"[REPLAN] retry_round={retry_round} batch={batch_index} size={len(batch_ids)} seconds={t_batch1 - t_batch0:.2f}")
 
-            # final regeneration for those bad examples
             for batch_index, batch_ids in enumerate(batched(bad_indices, self.cfg.batch_size)):
                 generate_final(
                     batch_ids,
@@ -1021,7 +1171,6 @@ class InferenceRunner:
         if "id" not in out_df.columns:
             out_df.insert(0, "id", [str(i) for i in range(len(out_df))])
 
-        # REQUIRED: humor_type column
         out_df["humor_type"] = humor_types
         out_df["prediction"] = outputs
 
@@ -1030,8 +1179,9 @@ class InferenceRunner:
         zip_path = zip_file(out_path)
 
         # ---------------------------
-        # Log failures + fallbacks (JSON log)
+        # Log failures + fallbacks
         # ---------------------------
+
         failed_items: List[Dict[str, Any]] = []
         for i in sorted(ever_failed):
             row_id = str(out_df.loc[i, "id"]) if "id" in out_df.columns else str(i)

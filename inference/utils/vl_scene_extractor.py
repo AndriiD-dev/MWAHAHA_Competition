@@ -3,9 +3,10 @@ from __future__ import annotations
 import gc
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from PIL import Image, ImageSequence
@@ -15,7 +16,6 @@ import pandas as pd
 import requests
 
 from inference.config import PromptBuilderConfig
-from inference.utils.prompt_builder import PromptBuilder
 
 
 _WS = re.compile(r"\s+")
@@ -40,83 +40,6 @@ def _try_parse_json(s: str) -> Optional[Dict[str, Any]]:
     except Exception:
         return None
 
-def _base_form(w: str) -> str:
-    w = (w or "").strip().lower()
-    # strip possessive-like (rare for VL but cheap)
-    w = re.sub(r"(?:'s)$", "", w)
-    # plural heuristics (similar to spacy_extractor baseform variants)
-    if w.endswith("ies") and len(w) > 4:
-        return w[:-3] + "y"
-    if w.endswith("es") and len(w) > 4:
-        return w[:-2]
-    if w.endswith("s") and len(w) > 4 and not w.endswith("ss"):
-        return w[:-1]
-    return w
-
-
-def _facts_ok(text: Any, *, min_words: int = 8, max_words: int = 25) -> bool:
-    if not isinstance(text, str):
-        return False
-    t = _one_line(text)
-
-    # one sentence-ish: avoid multiple hard sentence splits
-    if t.count(".") + t.count("!") + t.count("?") > 2:
-        return False
-
-    # avoid joke-y markers
-    if re.search(r"\b(joke|funny|hilarious|lol|lmao)\b", t, flags=re.IGNORECASE):
-        return False
-
-    words = [w for w in re.split(r"\s+", t) if w]
-    return min_words <= len(words) <= max_words
-
-
-
-def _anchors_ok(a: Any, *, banned: Iterable[str]) -> bool:
-    if not isinstance(a, list) or len(a) != 2:
-        return False
-
-    bset = {str(x).strip().lower() for x in banned if str(x).strip()}
-
-    w1 = a[0] if len(a) > 0 else ""
-    w2 = a[1] if len(a) > 1 else ""
-    if not isinstance(w1, str) or not isinstance(w2, str):
-        return False
-
-    w1 = w1.strip().lower()
-    w2 = w2.strip().lower()
-
-    # must be single-token lowercase alphabetic (spacy_extractor enforces word-ish tokens) :contentReference[oaicite:6]{index=6}
-    if not re.fullmatch(r"[a-z]+", w1) or not re.fullmatch(r"[a-z]+", w2):
-        return False
-    if len(w1) < 3 or len(w2) < 3:
-        return False
-
-    # ban generic/low-signal nouns
-    if w1 in bset or w2 in bset:
-        return False
-
-    # avoid duplicates and near-duplicates (plural/base-form collapse)
-    if w1 == w2:
-        return False
-    if _base_form(w1) == _base_form(w2):
-        return False
-
-    # reject contraction-like endings just in case (mirrors spacy_extractor reject_contraction_like) :contentReference[oaicite:7]{index=7}
-    if re.search(r"'(?:ll|re|ve|m|d|s)$", w1) or re.search(r"'(?:ll|re|ve|m|d|s)$", w2):
-        return False
-
-    return True
-
-
-def _pick_col(df: pd.DataFrame, candidates: List[str]) -> str:
-    cols = {c.lower(): c for c in df.columns}
-    for want in candidates:
-        k = want.lower()
-        if k in cols:
-            return cols[k]
-    return ""
-
 
 def _is_url(s: str) -> bool:
     s = (s or "").strip().lower()
@@ -140,10 +63,7 @@ def _extract_gif_frames(
     max_side: int = 512,
 ) -> List[Image.Image]:
     """
-    Simple, dependency-free frame extraction:
-    - evenly samples up to max_frames frames from the GIF
-    - converts frames to RGB
-    - resizes so max(width,height) <= max_side
+    Evenly sample up to max_frames from a GIF, convert to RGB, resize to max_side.
     """
     img = Image.open(gif_path)
     frames_all = [f.copy() for f in ImageSequence.Iterator(img)]
@@ -168,15 +88,82 @@ def _extract_gif_frames(
     return out
 
 
+def _pick_col(df: pd.DataFrame, candidates: List[str]) -> str:
+    cols = {c.lower(): c for c in df.columns}
+    for want in candidates:
+        k = want.lower()
+        if k in cols:
+            return cols[k]
+    return ""
+
+
+def _count_words(s: str) -> int:
+    s = _one_line(s)
+    if not s:
+        return 0
+    return len([w for w in s.split(" ") if w])
+
+
+def _valid_ctx(obj: Dict[str, Any], required_keys: Tuple[str, ...]) -> bool:
+    # Strict keys: no extras, no missing.
+    if set(obj.keys()) != set(required_keys):
+        return False
+
+    # Types: all must be strings.
+    for k in required_keys:
+        if not isinstance(obj.get(k), str):
+            return False
+
+    image_facts = _one_line(obj.get("image_facts", ""))
+    if not image_facts:
+        return False
+
+    # Avoid multi-sentence dumps (keep robust; allow 1-2 punctuations).
+    if (image_facts.count(".") + image_facts.count("!") + image_facts.count("?")) > 2:
+        return False
+
+    wc = _count_words(image_facts)
+    if wc < 10 or wc > 30:
+        return False
+
+    # Avoid joke/intent markers
+    if re.search(r"\b(joke|funny|hilarious|lol|lmao)\b", image_facts, flags=re.IGNORECASE):
+        return False
+
+    # No filler for key_objects
+    key_objects = _one_line(obj.get("key_objects", "")).lower()
+    if key_objects:
+        if re.search(r"\b(thing|stuff|object|item|someone|anyone|everyone|person|people)\b", key_objects):
+            return False
+
+    return True
+
+
+def _sanitize_ctx(obj: Dict[str, Any]) -> Dict[str, str]:
+    return {k: _one_line(str(v or "")) for k, v in obj.items()}
+
+
+def batched(indices: List[int], batch_size: int) -> List[List[int]]:
+    out: List[List[int]] = []
+    cur: List[int] = []
+    for i in indices:
+        cur.append(i)
+        if len(cur) >= batch_size:
+            out.append(cur)
+            cur = []
+    if cur:
+        out.append(cur)
+    return out
+
+
 @dataclass
 class VLSceneExtractor:
     """
     Vision-language preprocessing:
       - input: GIF frames
-      - output: (scene, (noun1, noun2))
-
-    Also supports:
-      - input tab separated values -> output comma separated values with scene + nouns
+      - output: strict JSON -> image context only
+      - TSV -> CSV: add context columns (no nouns)
+      - logs: write one sample per batch into a JSONL file
     """
     config: PromptBuilderConfig = field(default_factory=PromptBuilderConfig)
 
@@ -217,14 +204,9 @@ class VLSceneExtractor:
         return self._model, self._processor
 
     def close(self) -> None:
-        """
-        Release model and processor references and clear caches.
-        This frees most graphics processing unit memory and helps free random access memory.
-        """
         try:
             if self._model is not None:
                 try:
-                    # Best effort: move to central processing unit before deletion
                     self._model.to("cpu")
                 except Exception:
                     pass
@@ -270,23 +252,19 @@ class VLSceneExtractor:
         txt = processor.batch_decode(gen_only, skip_special_tokens=True)[0]
         return _one_line(txt)
 
-    def extract_scene_and_anchors(
+    def extract_context(
         self,
         frames: List[Image.Image],
         *,
         max_tries: Optional[int] = None,
-    ) -> Tuple[str, Tuple[str, str]]:
+    ) -> Dict[str, str]:
         """
-        Returns:
-          scene: a short neutral description (aligned to plan prompt name "image_facts")
-          noun1, noun2: two concrete visible nouns, lowercase
+        Returns a strict dict with keys:
+        image_facts, ambience, written_text, key_objects, actions, setting, camera_style
         """
         s = self.config.vl_scene_extractor
+        required = tuple(s.json_required_keys)
         tries_limit = int(max_tries) if max_tries is not None else int(s.max_tries)
-
-        banned = {x.lower() for x in self.config.generic_nouns}
-        # Extra hard bans for image extraction quality
-        banned |= {x.lower() for x in self.config.vl_scene_extractor.banned_nouns_extra}
 
         system = s.system_prompt
         user = s.user_prompt
@@ -296,33 +274,27 @@ class VLSceneExtractor:
 
         tries = 1
         while tries < tries_limit:
-            if obj:
-                facts_val = obj.get(s.json_facts_key) or obj.get("scene")
-                nouns_val = obj.get(s.json_nouns_key) or obj.get("anchors")
-                if _facts_ok(facts_val) and _anchors_ok(nouns_val, banned=banned):
-                    break
+            if obj and _valid_ctx(obj, required):
+                return _sanitize_ctx(obj)
 
             fix_user = s.repair_user_template.format(previous=raw)
             raw = self._gen(frames, system, fix_user)
             obj = _try_parse_json(raw)
             tries += 1
 
-        if not obj:
-            return ("A short clip showing a simple situation.", ("object", "person"))
-
-        facts_val = obj.get(s.json_facts_key) or obj.get("scene")
-        nouns_val = obj.get(s.json_nouns_key) or obj.get("anchors")
-
-        if not _facts_ok(facts_val) or not _anchors_ok(nouns_val, banned=banned):
-            return ("A short clip showing a simple situation.", ("object", "person"))
-
-        scene = _one_line(str(facts_val))
-        a1 = str(nouns_val[0]).strip().lower()
-        a2 = str(nouns_val[1]).strip().lower()
-        return (scene, (a1, a2))
+        # Fallback: keep schema valid (strict keys), keep it neutral.
+        return {
+            "image_facts": "A short clip showing a simple situation.",
+            "ambience": "",
+            "written_text": "",
+            "key_objects": "",
+            "actions": "",
+            "setting": "",
+            "camera_style": "",
+        }
 
     # ----------------------------
-    # TSV -> CSV preprocessing
+    # TSV -> CSV preprocessing + batch logging
     # ----------------------------
 
     def extract_tsv_to_csv(
@@ -332,92 +304,136 @@ class VLSceneExtractor:
         output_csv: Optional[Path] = None,
         max_frames: int = 6,
         max_side: int = 512,
+        batch_size: int = 16,
         unload_after: bool = True,
         download_timeout_seconds: int = 60,
     ) -> Path:
         """
         Reads a tab separated values file with a GIF location column.
-        Writes a comma separated values file with extracted scene + nouns.
+        Writes a comma separated values file with extracted image context fields.
 
-        Output includes:
-          - id (existing or created)
-          - gif_url and or gif_path (if present)
-          - prompt_text (if present)
-          - scene, noun1, noun2 (new)
+        Also writes one sampled extraction per batch into:
+          outputs/<stem>.vl_samples.jsonl
         """
         df = pd.read_csv(input_tsv, sep="\t", keep_default_na=False)
-
         s = self.config.vl_scene_extractor
 
-        id_col = _pick_col(df, [getattr(s, "id_col", "id"), "id"])
-        gif_url_col = _pick_col(df, [getattr(s, "gif_url_col", "gif_url"), "gif_url", "url"])
-        gif_path_col = _pick_col(df, [getattr(s, "gif_path_col", "gif_path"), "gif_path", "path", "filepath", "file"])
-        prompt_text_col = _pick_col(df, [getattr(s, "prompt_text_col", "prompt_text"), "prompt_text", "prompt", "text"])
+        id_col = _pick_col(df, ["id"])
+        gif_url_col = _pick_col(df, ["gif_url", "url"])
+        gif_path_col = _pick_col(df, ["gif_path", "path", "filepath", "file"])
+        prompt_text_col = _pick_col(df, ["prompt_text", "prompt", "text"])
 
         if not id_col:
             df.insert(0, "id", [f"row_{i:05d}" for i in range(len(df))])
             id_col = "id"
 
         if not gif_url_col and not gif_path_col:
-            raise ValueError("Input must contain a GIF url column (gif_url or url) or a GIF path column (gif_path).")
+            raise ValueError("Input must contain a GIF url column (gif_url/url) or a GIF path column (gif_path/path).")
 
-        out = output_csv
-        if out is None:
-            out = self.config.paths.data_dir / f"{Path(input_tsv).stem}.scenes.csv"
+        out = output_csv or (self.config.paths.data_dir / f"{Path(input_tsv).stem}.scenes.csv")
         out.parent.mkdir(parents=True, exist_ok=True)
 
         tmp_dir = self.config.paths.data_dir / "_tmp_gifs"
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        scenes: List[str] = []
-        n1s: List[str] = []
-        n2s: List[str] = []
+        # Separate per-batch sample log (JSON Lines)
+        samples_path = self.config.paths.output_dir / f"{Path(input_tsv).stem}.vl_samples.jsonl"
+        samples_path.parent.mkdir(parents=True, exist_ok=True)
 
-        n = len(df)
-        try:
-            for i in range(n):
-                rid = str(df.loc[i, id_col]).strip() or f"row_{i:05d}"
+        scenes: List[str] = [""] * len(df)
+        ambiences: List[str] = [""] * len(df)
+        written_texts: List[str] = [""] * len(df)
+        key_objects_list: List[str] = [""] * len(df)
+        actions_list: List[str] = [""] * len(df)
+        settings_list: List[str] = [""] * len(df)
+        camera_styles: List[str] = [""] * len(df)
 
-                local = ""
-                if gif_path_col:
-                    local = str(df.loc[i, gif_path_col]).strip()
+        indices = list(range(len(df)))
+        batches = batched(indices, max(1, int(batch_size)))
 
-                if not local and gif_url_col:
-                    local = str(df.loc[i, gif_url_col]).strip()
+        # append mode: keep history across runs unless you delete it
+        with samples_path.open("a", encoding="utf-8") as sample_f:
+            try:
+                for batch_index, batch_ids in enumerate(batches):
+                    t_batch0 = time.time()
 
-                if not local:
-                    scenes.append("A short clip showing a simple situation.")
-                    n1s.append("object")
-                    n2s.append("person")
-                    continue
+                    first_sample_written = False
 
-                if _is_url(local):
-                    gif_path = _download(local, tmp_dir / f"{rid}.gif", timeout_seconds=download_timeout_seconds)
-                else:
-                    gif_path = Path(local)
+                    for i in batch_ids:
+                        rid = str(df.loc[i, id_col]).strip() or f"row_{i:05d}"
 
-                frames = _extract_gif_frames(gif_path, max_frames=max_frames, max_side=max_side)
-                if not frames:
-                    scenes.append("A short clip showing a simple situation.")
-                    n1s.append("object")
-                    n2s.append("person")
-                    continue
+                        local = ""
+                        if gif_path_col:
+                            local = str(df.loc[i, gif_path_col]).strip()
+                        if not local and gif_url_col:
+                            local = str(df.loc[i, gif_url_col]).strip()
 
-                scene, (a1, a2) = self.extract_scene_and_anchors(frames)
-                scenes.append(scene)
-                n1s.append(a1)
-                n2s.append(a2)
+                        if not local:
+                            ctx = {
+                                "image_facts": "A short clip showing a simple situation.",
+                                "ambience": "",
+                                "written_text": "",
+                                "key_objects": "",
+                                "actions": "",
+                                "setting": "",
+                                "camera_style": "",
+                            }
+                        else:
+                            if _is_url(local):
+                                gif_path = _download(local, tmp_dir / f"{rid}.gif", timeout_seconds=download_timeout_seconds)
+                            else:
+                                gif_path = Path(local)
 
-                if (i + 1) % 25 == 0 or (i + 1) == n:
-                    print(f"vl_scene_extractor: {i + 1}/{n}")
-        finally:
-            if unload_after:
-                self.close()
+                            frames = _extract_gif_frames(gif_path, max_frames=max_frames, max_side=max_side)
+                            ctx = self.extract_context(frames) if frames else {
+                                "image_facts": "A short clip showing a simple situation.",
+                                "ambience": "",
+                                "written_text": "",
+                                "key_objects": "",
+                                "actions": "",
+                                "setting": "",
+                                "camera_style": "",
+                            }
+
+                        scenes[i] = ctx["image_facts"]
+                        ambiences[i] = ctx["ambience"]
+                        written_texts[i] = ctx["written_text"]
+                        key_objects_list[i] = ctx["key_objects"]
+                        actions_list[i] = ctx["actions"]
+                        settings_list[i] = ctx["setting"]
+                        camera_styles[i] = ctx["camera_style"]
+
+                        # Log exactly one sample per batch into file
+                        if not first_sample_written:
+                            payload = {
+                                "stage": "vl_extract",
+                                "batch_index": int(batch_index),
+                                "batch_size": int(len(batch_ids)),
+                                "example_index": int(i),
+                                "id": rid,
+                                "gif_source": local,
+                                "context": ctx,
+                            }
+                            sample_f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+                            sample_f.flush()
+                            first_sample_written = True
+
+                    t_batch1 = time.time()
+                    print(f"[VISION_LANGUAGE] batch={batch_index} size={len(batch_ids)} seconds={t_batch1 - t_batch0:.2f}")
+
+            finally:
+                if unload_after:
+                    self.close()
 
         df_out = df.copy()
+        # Keep `scene` column for compatibility; it stores image_facts.
         df_out[s.scene_col] = scenes
-        df_out[s.noun1_col] = n1s
-        df_out[s.noun2_col] = n2s
+        df_out[s.ambience_col] = ambiences
+        df_out[s.written_text_col] = written_texts
+        df_out[s.key_objects_col] = key_objects_list
+        df_out[s.actions_col] = actions_list
+        df_out[s.setting_col] = settings_list
+        df_out[s.camera_style_col] = camera_styles
 
         # reorder: put key columns first
         front: List[str] = [id_col]
@@ -427,7 +443,15 @@ class VLSceneExtractor:
             front.append(gif_path_col)
         if prompt_text_col:
             front.append(prompt_text_col)
-        front += [s.scene_col, s.noun1_col, s.noun2_col]
+        front += [
+            s.scene_col,
+            s.ambience_col,
+            s.written_text_col,
+            s.key_objects_col,
+            s.actions_col,
+            s.setting_col,
+            s.camera_style_col,
+        ]
 
         cols = list(df_out.columns)
         front = [c for c in front if c in cols]
@@ -436,6 +460,7 @@ class VLSceneExtractor:
 
         df_out.to_csv(out, index=False)
         print("Saved:", out)
+        print("Batch samples log:", samples_path)
         return out
 
 
@@ -447,6 +472,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     parser.add_argument("--output_csv", type=str, required=True)
     parser.add_argument("--max_frames", type=int, default=6)
     parser.add_argument("--max_side", type=int, default=512)
+    parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--unload_after", action="store_true")
     args = parser.parse_args(argv)
 
@@ -457,6 +483,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         output_csv=Path(args.output_csv),
         max_frames=int(args.max_frames),
         max_side=int(args.max_side),
+        batch_size=int(args.batch_size),
         unload_after=bool(args.unload_after),
     )
 

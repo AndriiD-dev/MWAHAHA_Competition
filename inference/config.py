@@ -206,17 +206,42 @@ class PromptTexts:
 
     caption_mm_b1_pun_plan_task: str = (
         "### Pun and wordplay\n"
-        "Definition: lexical pivot supports two readings; punchline forces the hidden one. Not irony or satire: language mechanics.\n"
-        "Inputs: mode=image_caption_b1; image_facts present; no prompt_text; pick nouns as two concrete visible nouns.\n"
-        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences).\n"
+        "Definition: a lexical pivot supports two readings; punchline forces the hidden one. Not irony or satire.\n"
+        "Inputs: mode=image_caption_b1; IMAGE_FACTS contains image context; nouns are PROVIDED as anchors.\n"
+        "IMAGE_FACTS format:\n"
+        "- Line 1: IMAGE_CONTEXT_RAW: <one-sentence description>\n"
+        "- Line 2: DERIVED: setting=...; action=...; objects=...; ambience=...; camera=...; text=...\n"
+        "If DERIVED includes text=..., prioritize pivots that use that text.\n"
+        "\n"
+        "IMAGE_FACTS:\n"
+        "{image_facts}\n"
+        "\n"
+        "Return ONE LINE JSON only. No markdown. No extra keys. Keep strings short.\n"
         "Schema:\n"
-        '{"humor_type":"pun","mode":"image_caption_b1","max_words":20,"nouns":["<noun1>","<noun2>"],'
+        '{'
+        '"humor_type":"pun","mode":"image_caption_b1","max_words":20,"nouns":["<noun1>","<noun2>"],'
+        '"vision_parse":{'
+        '"scene_brief":"...","salient_objects":[...],"salient_action":"...",'
+        '"written_text_present":true,"written_text":"...",'
+        '"comic_hook":"mismatch|overreaction|failure|surprise|awkward|none",'
+        '"scene_angles":[...]'
+        '},'
         '"noun_terms":{"noun1_terms":[...],"noun2_terms":[...]},'
         '"shared_terms":[...],'
         '"pivot_candidates":[{"pivot":"...","dual_readings":["surface","hidden"],"link":"..."}],'
-        '"pun_core":{"headline_knowledge":[...],"combination_proposition":"...","inferred_setup_candidates":[...],"hidden_setup_candidates":[...]},'
-        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
-        "Sizes: noun_terms 5-8 each; shared_terms 0-4; pivot_candidates 5-7; headline_knowledge 0-2; inferred_setup 2-4; hidden_setup 2-4. Must support final caption <= 20 words.\n"
+        '"pun_core":{'
+        '"combination_proposition":"...",'
+        '"surface_setup":"...",'
+        '"hidden_reading_cue":"..."'
+        '},'
+        '"output_blueprint":{"format":"one-liner|question_answer","must_include":["<noun1>","<noun2>"]}'
+        '}\n'
+        "Rules:\n"
+        "- vision_parse must be grounded in IMAGE_FACTS (use DERIVED when possible).\n"
+        "- vision_parse.scene_brief: 4-10 words. salient_action: 2-6 words or empty.\n"
+        "- written_text_present must match written_text (empty => false).\n"
+        "- pivot_candidates: 4-6 strong options; dual_readings must be clearly different.\n"
+        "- Final caption must be <= 20 words and include BOTH nouns.\n"
     )
 
     caption_mm_b2_pun_plan_task: str = (
@@ -303,18 +328,43 @@ class PromptTexts:
 
     caption_mm_b1_irony_plan_task: str = (
         "### Irony\n"
-        "Definition: intent mismatch (said ≠ meant), e.g., praise for something clearly bad or calm understatement for something annoying.\n"
-        "Not pun or satire: no wordplay pivot needed; no public target or mock-news voice required.\n"
-        "Inputs: mode=image_caption_b1; image_facts present; no prompt_text; pick nouns as two concrete visible nouns.\n"
-        "Return ONE LINE JavaScript Object Notation only, no extra keys. Keep strings short (phrases, not sentences), except everyday_knowledge.\n"
+        "Definition: intent mismatch (said ≠ meant). Positive/neutral utterance about something clearly bad/awkward.\n"
+        "Not pun or satire.\n"
+        "Inputs: mode=image_caption_b1; IMAGE_FACTS contains image context; nouns are PROVIDED as anchors.\n"
+        "IMAGE_FACTS format:\n"
+        "- Line 1: IMAGE_CONTEXT_RAW: <one-sentence description>\n"
+        "- Line 2: DERIVED: setting=...; action=...; objects=...; ambience=...; camera=...; text=...\n"
+        "\n"
+        "IMAGE_FACTS:\n"
+        "{image_facts}\n"
+        "\n"
+        "Return ONE LINE JSON only. No markdown. No extra keys. Keep strings short (phrases), except everyday_knowledge.\n"
         "Schema:\n"
-        '{"humor_type":"irony","mode":"image_caption_b1","max_words":20,"nouns":["<noun1>","<noun2>"],'
-        '"derived_situation":{"domain":"daily life|work/school|services|home|health/energy",'
-        '"situation_candidates":[...],"negative_reality_candidates":[...],"positive_utterance_candidates":[...]},'
+        '{'
+        '"humor_type":"irony","mode":"image_caption_b1","max_words":20,"nouns":["<noun1>","<noun2>"],'
+        '"vision_parse":{'
+        '"scene_brief":"...","salient_objects":[...],"salient_action":"...",'
+        '"written_text_present":true,"written_text":"...",'
+        '"comic_hook":"mismatch|overreaction|failure|surprise|awkward|none",'
+        '"scene_angles":[...]'
+        '},'
+        '"derived_situation":{'
+        '"domain":"daily life|work/school|services|home|health/energy",'
+        '"situation_candidates":[...],'
+        '"negative_reality_candidates":[...],'
+        '"positive_utterance_candidates":[...]'
+        '},'
         '"everyday_knowledge":[...],'
-        '"irony_core":{"combination_proposition":"..."},'
-        '"output_blueprint":{"format":"one-liner|question_answer"}}\n'
-        "Sizes: situation_candidates 2-3; negative_reality_candidates 2-3; positive_utterance_candidates 2-3; everyday_knowledge 2-4 (1 sentence each); combination_proposition 0-1 (1 sentence). Must support final caption <= 20 words.\n"
+        '"irony_core":{"combination_proposition":"...","best_pairing":{"situation":"...","utterance":"..."}},'
+        '"output_blueprint":{"format":"one-liner|question_answer","must_include":["<noun1>","<noun2>"]}'
+        '}\n'
+        "Rules:\n"
+        "- vision_parse must be grounded in IMAGE_FACTS (use DERIVED when possible).\n"
+        "- situation_candidates: 2-3 grounded frames; include BOTH nouns.\n"
+        "- negative_reality_candidates: 2-3 direct consequences.\n"
+        "- positive_utterance_candidates: 2-3 clearly positive phrases that contradict negative reality.\n"
+        "- everyday_knowledge: 2-4 short sentences.\n"
+        "- Final caption must be <= 20 words and include BOTH nouns.\n"
     )
 
     caption_mm_b2_irony_plan_task: str = (
@@ -387,6 +437,10 @@ class MicrocardSettings:
         "it", "its", "this", "that", "these", "those",
     })
 
+# =============================================================================
+# Vision-language scene extraction settings
+# =============================================================================
+
 @dataclass(frozen=True)
 class VLSceneExtractorSettings:
     # Model
@@ -395,36 +449,65 @@ class VLSceneExtractorSettings:
 
     # Decoding / retries
     max_tries: int = 6
-    max_new_tokens: int = 160
-    temperature: float = 0.3
+    max_new_tokens: int = 180
+    temperature: float = 0.2
     top_p: float = 0.9
 
     # Output column names (CSV)
-    scene_col: str = "scene"  # keep "scene" for now (runner compatibility)
+    # Keep scene_col for runner compatibility (it corresponds to image_facts)
+    scene_col: str = "scene"
+    ambience_col: str = "ambience"
+    written_text_col: str = "written_text"
+    key_objects_col: str = "key_objects"
+    actions_col: str = "actions"
+    setting_col: str = "setting"
+    camera_style_col: str = "camera_style"
+
+    # Backward-compat only (no longer produced by VL extractor)
     noun1_col: str = "noun1"
     noun2_col: str = "noun2"
 
-    # New: JSON keys aligned with plan prompts
+    # JSON keys (must match exactly)
     json_facts_key: str = "image_facts"
-    json_nouns_key: str = "nouns"
+    json_ambience_key: str = "ambience"
+    json_written_text_key: str = "written_text"
+    json_key_objects_key: str = "key_objects"
+    json_actions_key: str = "actions"
+    json_setting_key: str = "setting"
+    json_camera_style_key: str = "camera_style"
+
+    # Strict schema enforcement (no extra keys)
+    json_required_keys: Tuple[str, ...] = (
+        "image_facts",
+        "ambience",
+        "written_text",
+        "key_objects",
+        "actions",
+        "setting",
+        "camera_style",
+    )
 
     system_prompt: str = (
         "Return ONE LINE JSON only. No markdown. No extra keys.\n"
         "Schema:\n"
-        '{"image_facts":"...","nouns":["...","..."]}\n'
+        '{"image_facts":"...","ambience":"...","written_text":"...","key_objects":"...","actions":"...","setting":"...","camera_style":"..."}\n'
         "Rules:\n"
-        "- image_facts: neutral, concrete, visible-only; 1 sentence; 8-25 words; no jokes.\n"
-        "- nouns: exactly 2 distinct visible common nouns; lowercase a-z; single word; avoid generic (person, people, thing, object, stuff).\n"
+        "- image_facts: neutral visible-only; exactly 1 sentence; 10-30 words; no jokes; no intent.\n"
+        "- ambience: 2-8 words for mood + style; empty if unclear.\n"
+        "- written_text: exact transcription of readable text; empty if none; never guess.\n"
+        "- key_objects: 3-8 comma-separated nouns; visible things only; no filler (thing, stuff, object, person).\n"
+        "- actions: 0-2 short verb phrases, comma-separated; empty if none.\n"
+        "- setting: 2-6 words for location/context; empty if unclear.\n"
+        "- camera_style: 2-6 words for shot/lighting/composition; empty if unclear.\n"
     )
 
     user_prompt: str = "Analyze the images and produce the JSON."
 
     repair_user_template: str = (
-        "Fix your output to match Schema and Rules. Return ONE LINE JSON only.\n"
+        "Fix your output to match Schema and Rules. Return ONE LINE JSON only. No extra keys.\n"
         "Previous: {previous}\n"
     )
 
-    banned_nouns_extra: Tuple[str, ...] = ("object", "thing", "stuff", "person", "people")
 
 
 # =============================================================================

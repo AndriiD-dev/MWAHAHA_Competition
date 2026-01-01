@@ -18,13 +18,14 @@ RUNNER_CONFIG = {
     # Vision language extractor is called as a shell command:
     # python -m inference.utils.vl_scene_extractor --input_tsv ... --output_csv ...
     "vl_scene_extractor_module": "inference.utils.vl_scene_extractor",
-    "vl_force_rerun": False,
+
+    "vl_force_rerun": True,
 
     "batch_size": 16,
     "caption_max_words": 20,
 
     "plan_decode": {
-        "max_new_tokens": 80,
+        "max_new_tokens": 120,
         "min_new_tokens": 16,
         "temperature": 0.4,
         "top_p": 0.9,
